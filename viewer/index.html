@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Self-Evolving World</title>
+<style>
+  :root {
+    --bg: #0b0e0c;
+    --grid: #16201a;
+    --creature: #7fd99b;
+    --resource: #d9b17f;
+    --text: #cfe8d6;
+    --muted: #6b8072;
+  }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px 16px;
+  }
+  canvas {
+    background: var(--grid);
+    border: 1px solid #223327;
+    max-width: 100%;
+  }
+  #stats { margin-top: 12px; font-size: 14px; color: var(--muted); }
+  #stats b { color: var(--text); }
+  h1 { font-size: 16px; font-weight: 500; letter-spacing: 0.02em; }
+</style>
+</head>
+<body>
+  <h1>self-evolving world</h1>
+  <canvas id="c" width="400" height="400"></canvas>
+  <div id="stats">loading...</div>
+
+<script>
+const CELL = 10; // 400 / 40 grid
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const stats = document.getElementById('stats');
+
+async function render() {
+  let world;
+  try {
+    const res = await fetch('../state/world.json?_=' + Date.now());
+    world = await res.json();
+  } catch (e) {
+    stats.textContent = 'could not load state/world.json';
+    return;
+  }
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--resource');
+  for (const r of world.resources || []) {
+    ctx.fillRect(r.x * CELL + 3, r.y * CELL + 3, 4, 4);
+  }
+
+  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--creature');
+  for (const c of world.creatures || []) {
+    ctx.beginPath();
+    ctx.arc(c.x * CELL + CELL / 2, c.y * CELL + CELL / 2, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  stats.innerHTML = `tick <b>${world.tick}</b> &nbsp;·&nbsp; population <b>${world.population}</b> &nbsp;·&nbsp; resources <b>${(world.resources||[]).length}</b>`;
+}
+
+render();
+setInterval(render, 3000);
+</script>
+</body>
+</html>

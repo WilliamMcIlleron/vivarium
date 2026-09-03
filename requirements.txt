@@ -1,0 +1,6 @@
+pytest>=8.0
+
+# Only required if WORLD_BACKEND=api (see config.py / README.md).
+# Not needed for the default "cli" backend, which shells out to the
+# already-installed `claude` CLI instead.
+anthropic>=0.40.0

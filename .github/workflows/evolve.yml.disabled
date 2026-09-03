@@ -1,0 +1,47 @@
+# Rename this file to `evolve.yml` (drop the `.disabled`) once you've upgraded
+# to the API backend (README.md -> "Upgrading to the API later"). Do NOT enable
+# this while WORLD_BACKEND=cli - GitHub-hosted runners can't use your personal
+# subscription login, and scripted use of subscription OAuth from CI infra is
+# exactly the pattern Anthropic's terms are strict about. This workflow is
+# written for the API key path from the start.
+#
+# Before enabling:
+#   1. Set the ANTHROPIC_API_KEY secret in this repo's Settings -> Secrets.
+#   2. Consider raising state/budget.json's max_evolve_runs_per_day now that
+#      you're not sharing a subscription quota with your own usage.
+
+name: evolve
+
+on:
+  schedule:
+    - cron: "0 3 * * *"   # once a day, 03:00 UTC
+  workflow_dispatch: {}    # allows manual trigger from the Actions tab
+
+jobs:
+  evolve:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      - name: Run simulate (catch up any missed ticks)
+        run: python driver.py simulate
+
+      - name: Run evolve
+        env:
+          WORLD_BACKEND: api
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python driver.py evolve
+
+      - name: Push changes
+        run: |
+          git config user.name "self-evolving-world"
+          git config user.email "actions@users.noreply.github.com"
+          git push

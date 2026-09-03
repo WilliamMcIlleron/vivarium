@@ -1,0 +1,8 @@
+{
+  "max_evolve_runs_per_day": 1,
+  "max_diff_files_per_run": 3,
+  "max_diff_lines_per_run": 150,
+  "runs_today": 0,
+  "last_run_date": null,
+  "total_evolve_runs": 0
+}

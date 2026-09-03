@@ -1,0 +1,20 @@
+# Protected paths
+
+Files and directories listed here can never be touched by an `evolve` run.
+`driver.py` checks every changed file against this list after Claude proposes
+a diff and BEFORE anything is written to disk. A match aborts the run with
+no changes applied and no commit made.
+
+One path per line. Directories match everything inside them.
+
+driver.py
+config.py
+PROTECTED.md
+state/budget.json
+state/paused.py
+PAUSED
+.github/workflows/
+.git/
+requirements.txt
+crontab.example
+README.md
