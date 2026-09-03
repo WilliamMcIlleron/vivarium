@@ -72,7 +72,15 @@ Current goals:
 Current contents of rules/ecosystem.py:
 {ecosystem_source}
 
+Current contents of viewer/index.html (the only way a human sees this world):
+{viewer_source}
+
 Rules for your response:
+- If your change adds anything visually meaningful (a new species, a visible \
+effect, a new attribute worth distinguishing), you MUST also update \
+viewer/index.html in this same response to render it distinctly - a new \
+color, shape, or size mapping. Do not leave new concepts invisible on screen. \
+Purely internal tuning changes don't require this.
 - Change at most {max_files} files, at most {max_lines} total changed lines.
 - You may write to files under rules/, and to state/goals.md if you want to \
 update the goals themselves. You may create NEW files under rules/ (e.g. a \
@@ -113,6 +121,7 @@ def cmd_evolve() -> None:
         changelog_tail=_tail(CHANGELOG_PATH, 30),
         goals=GOALS_PATH.read_text(),
         ecosystem_source=(ROOT / "rules" / "ecosystem.py").read_text(),
+        viewer_source=(ROOT / "viewer" / "index.html").read_text(),
         max_files=budget["max_diff_files_per_run"],
         max_lines=budget["max_diff_lines_per_run"],
         protected_paths=", ".join(_protected_paths()),
@@ -120,6 +129,15 @@ def cmd_evolve() -> None:
 
     backend = get_backend()
     raw = backend.complete(prompt)
+
+    # Count this against the daily budget the moment the LLM call happens -
+    # that's the expensive/quota-consuming step, regardless of whether the
+    # proposal ends up valid or passes tests. Otherwise repeated rejected
+    # proposals are free to retry and can burn your whole session on nothing.
+    budget["runs_today"] += 1
+    budget["total_evolve_runs"] += 1
+    _save_budget(budget)
+
     proposal = _parse_proposal(raw)
     if proposal is None:
         _append_changelog("evolve run FAILED: could not parse model response as JSON.")
@@ -143,9 +161,6 @@ def cmd_evolve() -> None:
     if proposal.get("goals_update"):
         GOALS_PATH.write_text(proposal["goals_update"])
 
-    budget["runs_today"] += 1
-    budget["total_evolve_runs"] += 1
-    _save_budget(budget)
     _append_changelog(proposal["changelog_entry"])
     _git_commit(proposal["changelog_entry"])
     print("evolve run committed:", proposal["changelog_entry"])

@@ -31,3 +31,10 @@ changelog entry.
 - Every change must keep `tests/` passing.
 - Respect `PROTECTED.md`.
 - If you rewrite this file, keep this "Constraints" section unchanged.
+- **Visual parity rule:** if a change introduces something a viewer could show
+  (a new species, a visible environmental effect, a new creature attribute
+  worth seeing), `viewer/index.html` must be updated in the same run to
+  represent it distinctly — a new color, shape, or size mapping, not just a
+  reused dot. A change that adds something invisible to the viewer is
+  incomplete. Changes that are purely internal (tuning a constant, refactoring)
+  don't require a viewer update — use judgment, but default to updating it.

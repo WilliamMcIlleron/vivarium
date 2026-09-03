@@ -1,0 +1,115 @@
+{
+  "tick": 6,
+  "creatures": [
+    {
+      "id": "0c2c788f-c024-4919-9209-9e8b53e310b5",
+      "x": 39,
+      "y": 17,
+      "energy": 44,
+      "speed": 1,
+      "sense_range": 5,
+      "age": 6
+    },
+    {
+      "id": "2b59de4a-fd54-4374-b06c-c753699f37f4",
+      "x": 38,
+      "y": 31,
+      "energy": 44,
+      "speed": 1,
+      "sense_range": 5,
+      "age": 6
+    },
+    {
+      "id": "bdc5c845-7a58-4a0c-a28b-6270b4498e55",
+      "x": 33,
+      "y": 22,
+      "energy": 44,
+      "speed": 1,
+      "sense_range": 5,
+      "age": 6
+    },
+    {
+      "id": "d312aae4-fd5f-4c85-b9bd-11ecab568cac",
+      "x": 12,
+      "y": 29,
+      "energy": 44,
+      "speed": 1,
+      "sense_range": 5,
+      "age": 6
+    },
+    {
+      "id": "7954842c-8ffd-42e0-95ec-b0e5f01b9184",
+      "x": 6,
+      "y": 17,
+      "energy": 44,
+      "speed": 1,
+      "sense_range": 5,
+      "age": 6
+    },
+    {
+      "id": "5de71e91-2806-4e1d-83da-600c44fd96ae",
+      "x": 7,
+      "y": 1,
+      "energy": 44,
+      "speed": 1,
+      "sense_range": 5,
+      "age": 6
+    },
+    {
+      "id": "1ecc1e3e-7527-4770-8c19-e4b87aa95c36",
+      "x": 1,
+      "y": 9,
+      "energy": 44,
+      "speed": 1,
+      "sense_range": 5,
+      "age": 6
+    },
+    {
+      "id": "08ea0f4b-db4a-49e9-9d88-efd735d732e5",
+      "x": 31,
+      "y": 32,
+      "energy": 44,
+      "speed": 1,
+      "sense_range": 5,
+      "age": 6
+    },
+    {
+      "id": "1107e912-94cf-47f4-9d34-b14ca49b4ace",
+      "x": 33,
+      "y": 22,
+      "energy": 44,
+      "speed": 1,
+      "sense_range": 5,
+      "age": 6
+    },
+    {
+      "id": "9bf16c4e-b739-4bf1-a2e3-45851aeef87b",
+      "x": 6,
+      "y": 25,
+      "energy": 44,
+      "speed": 1,
+      "sense_range": 5,
+      "age": 6
+    },
+    {
+      "id": "ad343de9-991d-48e7-aea3-2c6c35813dae",
+      "x": 22,
+      "y": 25,
+      "energy": 44,
+      "speed": 1,
+      "sense_range": 5,
+      "age": 6
+    },
+    {
+      "id": "2469bc12-c9f6-45b0-8b8d-0eae962bbf3c",
+      "x": 14,
+      "y": 12,
+      "energy": 44,
+      "speed": 1,
+      "sense_range": 5,
+      "age": 6
+    }
+  ],
+  "resources": [],
+  "population": 12
+}
