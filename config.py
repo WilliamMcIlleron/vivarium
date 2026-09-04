@@ -32,8 +32,14 @@ class ClaudeCodeCLIBackend(Backend):
     """
 
     def complete(self, prompt: str, max_tokens: int = 4000) -> str:
+        # Prompt goes via stdin, not as a CLI argument - Windows caps a
+        # process's full command line at ~32K characters, and this prompt
+        # embeds full source files that already exceed that on their own as
+        # the codebase grows. `claude -p` with no prompt argument reads from
+        # stdin, which has no such limit.
         result = subprocess.run(
-            ["claude", "-p", prompt],
+            ["claude", "-p"],
+            input=prompt,
             capture_output=True,
             text=True,
             timeout=600,
