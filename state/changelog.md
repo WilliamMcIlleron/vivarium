@@ -53,3 +53,7 @@ extinct in a minority of long runs) and what's next.
 ## 2026-09-04T21:19:48
 
 evolve run FAILED: could not parse model response as JSON.
+
+## 2026-09-04T21:23:24
+
+evolve run REVERTED (tests failed): attempted - The world was sitting at 1 grazer vs 7 hunters at tick 79 - the known extinction-risk balance issue actually happening, not hypothetical. Implemented the top candidate from goals.md: forest tiles now give grazers cover, halving a hunter's effective sense_range against a grazer standing on a forest cell (`_nearest_creature` in rules/ecosystem.py takes an optional `terrain` arg, passed only for the hunter-seeking-grazer lookup so grazers' own threat detection is unaffected). No viewer change needed since forest tiles are already rendered distinctly - this only changes behavior on an existing visual element, not what's drawn.
