@@ -7,6 +7,15 @@ import rules.ecosystem as eco
 from rules.ecosystem import Creature, World
 
 
+def _flat_terrain():
+    # Hand-constructed World() calls below bypass World.new()/from_dict(),
+    # so terrain defaults to [] - unlike any real world, which always has a
+    # full grid. An empty terrain silently breaks any code that indexes
+    # terrain[y][x] without a length check, in a way that has nothing to do
+    # with the logic under test.
+    return ["g" * eco.GRID_SIZE for _ in range(eco.GRID_SIZE)]
+
+
 def test_new_world_has_starting_population():
     world = World.new()
     assert len(world.creatures) > 0
@@ -34,7 +43,7 @@ def test_old_save_without_species_defaults_to_grazer():
 def test_hunter_eats_colocated_grazer():
     hunter = Creature(id="h1", x=5, y=5, energy=50, speed=1, sense_range=5, species="hunter")
     grazer = Creature(id="g1", x=5, y=5, energy=50, speed=1, sense_range=5, species="grazer")
-    world = World(tick=0, creatures=[grazer, hunter], resources=[])
+    world = World(tick=0, creatures=[grazer, hunter], resources=[], terrain=_flat_terrain())
     world.step()
     assert not any(c.id == "g1" for c in world.creatures)
     assert any(c.id == "h1" and c.energy > 50 for c in world.creatures)
@@ -116,7 +125,7 @@ def test_extinct_grazers_can_migrate_back(monkeypatch):
     # nothing left to bring either species back.
     monkeypatch.setattr(eco, "GRAZER_MIGRATION_RATE", 1.0)  # force it for the test
     hunter = Creature(id="h1", x=0, y=0, energy=50, speed=1, sense_range=5, species="hunter")
-    world = World(tick=0, creatures=[hunter], resources=[])
+    world = World(tick=0, creatures=[hunter], resources=[], terrain=_flat_terrain())
     world.step()
     assert any(c.species == "grazer" for c in world.creatures)
 

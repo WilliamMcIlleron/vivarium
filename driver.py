@@ -180,6 +180,26 @@ Respond with exactly this JSON shape:
 }}
 """
 
+RETRY_PROMPT_TEMPLATE = """\
+Your previous proposal for this same evolve run failed the test suite. Fix \
+the specific problem shown below and respond again with exactly the same \
+JSON shape. Change nothing else about your approach unless the failure shows \
+it's fundamentally broken - this is a fix, not a new proposal.
+
+Your previous proposal's files:
+{previous_files}
+
+pytest output from running the test suite against your proposal:
+{test_output}
+
+Respond with exactly this JSON shape:
+{{
+  "files": {{"relative/path.py": "full new file content", ...}},
+  "goals_update": "full new content of state/goals.md, or null if unchanged",
+  "changelog_entry": "1-3 sentences: what you changed and why"
+}}
+"""
+
 REFLECTION_PROMPT_TEMPLATE = """\
 You are writing a short field-journal entry about an artificial-life world \
 you've been quietly observing and modifying - not proposing a code change \
@@ -323,22 +343,74 @@ def _run_code_change(world: World, budget: dict, log: logging.Logger) -> None:
         sys.exit(1)
 
     backups = _write_files(proposal["files"])
-    tests_ok = _run_tests()
+    tests_ok, test_output = _run_tests()
 
+    retried = False
     if not tests_ok:
         _restore_files(backups)
-        msg = f"evolve run REVERTED (tests failed): attempted - {proposal['changelog_entry']}"
-        _append_changelog(msg)
-        log.warning(msg)
-        sys.exit(1)
+        retry_proposal = _attempt_retry(backend, proposal, test_output, budget, log)
+        if retry_proposal is None:
+            msg = f"evolve run REVERTED (tests failed): attempted - {proposal['changelog_entry']}"
+            _append_changelog(msg)
+            log.warning(msg)
+            sys.exit(1)
+
+        retried = True
+        proposal = retry_proposal
+        backups = _write_files(proposal["files"])
+        tests_ok, test_output = _run_tests()
+        if not tests_ok:
+            _restore_files(backups)
+            msg = (
+                f"evolve run REVERTED after one retry (tests failed again): "
+                f"attempted - {proposal['changelog_entry']}"
+            )
+            _append_changelog(msg)
+            log.warning(msg)
+            sys.exit(1)
 
     if proposal.get("goals_update"):
         GOALS_PATH.write_text(proposal["goals_update"])
 
-    _append_changelog(proposal["changelog_entry"])
-    _git_commit(proposal["changelog_entry"])
-    log.info(f"evolve run committed: {proposal['changelog_entry']}")
-    _notify("Vivarium evolved", proposal["changelog_entry"])
+    changelog_entry = proposal["changelog_entry"]
+    if retried:
+        changelog_entry = f"{changelog_entry} (succeeded on retry after an initial test failure)"
+    _append_changelog(changelog_entry)
+    _git_commit(changelog_entry)
+    log.info(f"evolve run committed: {changelog_entry}")
+    _notify("Vivarium evolved", changelog_entry)
+
+
+def _attempt_retry(
+    backend, proposal: dict, test_output: str, budget: dict, log: logging.Logger
+) -> dict | None:
+    """One retry after a first-attempt test failure - the same "see the failure,
+    fix it, re-run" loop a normal coding session gets and evolve otherwise doesn't.
+    Does NOT spend budget again; that already happened for the first
+    backend.complete() call in _run_code_change.
+
+    Returns the validated retry proposal, or None if the caller should fall
+    through to the normal (non-retry) revert path - a retry that fails to
+    parse or violates the guardrails is not retried again.
+    """
+    retry_prompt = RETRY_PROMPT_TEMPLATE.format(
+        previous_files=json.dumps(proposal["files"], indent=2),
+        test_output=test_output[-4000:],
+    )
+    raw = backend.complete(retry_prompt)
+
+    retry_proposal = _parse_proposal(raw)
+    if retry_proposal is None:
+        log.error("evolve retry FAILED: could not parse retry response as JSON.")
+        log.error(f"raw retry response was:\n{raw[:4000]}")
+        return None
+
+    ok, reason = _validate_proposal(retry_proposal, budget)
+    if not ok:
+        log.warning(f"evolve retry REJECTED: {reason}")
+        return None
+
+    return retry_proposal
 
 
 def _run_reflection(world: World, budget: dict, log: logging.Logger) -> None:
@@ -471,18 +543,19 @@ def _restore_files(backups: dict) -> None:
             full.write_text(old_content)
 
 
-def _run_tests() -> bool:
+def _run_tests() -> tuple[bool, str]:
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "tests/", "-q"],
         cwd=ROOT,
         capture_output=True,
         text=True,
     )
+    output = f"{result.stdout}\n{result.stderr}".strip()
     if result.returncode != 0:
         log = logging.getLogger("evolve")
         log.warning(result.stdout)
         log.warning(result.stderr)
-    return result.returncode == 0
+    return result.returncode == 0, output
 
 
 def _git_commit(message: str) -> None:
