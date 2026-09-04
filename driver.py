@@ -14,8 +14,11 @@ import difflib
 import json
 import logging
 import logging.handlers
+import os
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from config import get_backend
@@ -33,6 +36,11 @@ PAUSED_PATH = ROOT / "PAUSED"
 NOTIFY_SCRIPT = ROOT / "notify_windows.ps1"
 NOTABLE_EVENTS_PATH = STATE / "notable_events.log"
 LORE_PATH = STATE / "lore.md"
+
+# Backs the public viewer at https://vivarium.williamjonahmci.workers.dev/
+# (Cloudflare Worker + KV, see cloudflare/README.md). This ID is the real,
+# live namespace - not a secret, just an address.
+CLOUDFLARE_KV_NAMESPACE_ID = "69dfa0f55b53489e96e0b4e42a4a862d"
 
 # Events worth surfacing to evolve as real signal, distinct from routine
 # per-tick noise (births/deaths happen constantly and aren't notable on
@@ -84,7 +92,8 @@ def cmd_simulate() -> None:
     log = _make_logger("simulate")
     world = _load_world()
     world.step()
-    _save_world(world)
+    world_text = _save_world(world)
+    _sync_to_cloudflare("world.json", world_text, "application/json", log)
     d = world.to_dict()
     log.info(
         f"tick {world.tick}: population={d['population']} "
@@ -115,8 +124,10 @@ def _load_world() -> World:
     return World.new()
 
 
-def _save_world(world: World) -> None:
-    WORLD_PATH.write_text(json.dumps(world.to_dict(), indent=2))
+def _save_world(world: World) -> str:
+    text = json.dumps(world.to_dict(), indent=2)
+    WORLD_PATH.write_text(text)
+    return text
 
 
 # ------------------------------------------------------------------ evolve --
@@ -379,6 +390,10 @@ def _run_code_change(world: World, budget: dict, log: logging.Logger) -> None:
     _git_commit(changelog_entry)
     log.info(f"evolve run committed: {changelog_entry}")
     _notify("Vivarium evolved", changelog_entry)
+    _sync_to_cloudflare("changelog.md", CHANGELOG_PATH.read_text(), "text/plain; charset=utf-8", log)
+    if "viewer/index.html" in proposal["files"]:
+        viewer_html = (ROOT / "viewer" / "index.html").read_text()
+        _sync_to_cloudflare("viewer.html", viewer_html, "text/html; charset=utf-8", log)
 
 
 def _attempt_retry(
@@ -441,6 +456,8 @@ def _run_reflection(world: World, budget: dict, log: logging.Logger) -> None:
     _git_commit("weekly reflection")
     log.info("evolve run: reflection written to state/lore.md")
     _notify("Vivarium reflects", entry[:200])
+    _sync_to_cloudflare("lore.md", LORE_PATH.read_text(), "text/plain; charset=utf-8", log)
+    _sync_to_cloudflare("changelog.md", CHANGELOG_PATH.read_text(), "text/plain; charset=utf-8", log)
 
 
 def _spend_budget(budget: dict) -> None:
@@ -584,6 +601,39 @@ def _notify(title: str, message: str) -> None:
         )
     except Exception:
         pass
+
+
+def _sync_to_cloudflare(key: str, content: str, content_type: str, log: logging.Logger) -> None:
+    """Best-effort push of one file to the public KV store backing
+    https://vivarium.williamjonahmci.workers.dev/. Silently does nothing if
+    William hasn't set up his own Cloudflare credential - this can never be
+    a hard dependency for simulate/evolve to work standalone, and a sync
+    failure must never break an otherwise-successful run. Unlike _notify,
+    failures ARE logged (not just swallowed) since a silently-stale public
+    site is a real problem worth being able to debug later.
+    """
+    token = os.environ.get("CLOUDFLARE_API_TOKEN")
+    account_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
+    if not token or not account_id:
+        return
+
+    url = (
+        f"https://api.cloudflare.com/client/v4/accounts/{account_id}"
+        f"/storage/kv/namespaces/{CLOUDFLARE_KV_NAMESPACE_ID}/values/{key}"
+    )
+    try:
+        req = urllib.request.Request(
+            url,
+            data=content.encode("utf-8"),
+            method="PUT",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": content_type},
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            result = json.loads(resp.read())
+        if not result.get("success"):
+            log.warning(f"Cloudflare sync for {key!r} returned failure: {result.get('errors')}")
+    except Exception as e:
+        log.warning(f"Cloudflare sync for {key!r} failed: {e}")
 
 
 def _protected_paths() -> list[str]:

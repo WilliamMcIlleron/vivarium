@@ -10,34 +10,23 @@ than embedding content in the script itself. Routes:
 - `/state/changelog.md` -> KV key `changelog.md`
 - `/state/lore.md` -> KV key `lore.md`
 
-## Known limitation: this is a snapshot, not live
+## Live sync (as of 2026-09-05)
 
-The KV values were uploaded manually, once, on 2026-09-04. `driver.py` does
-NOT push updates to this deployment - `simulate` and `evolve` still only
-write to local files. The public site will drift stale (world.json frozen
-at whatever tick it was at deploy time) until an ongoing sync mechanism
-exists. This was a deliberate scope cut, not an oversight - see below for
-why and what it would take to close it.
+`driver.py` pushes updates to this deployment itself now, via
+`_sync_to_cloudflare()`: `world.json` after every `simulate` tick,
+`changelog.md` after every evolve commit or reflection, `lore.md` after a
+reflection, and `viewer.html` whenever an evolve commit touches
+`viewer/index.html`. It authenticates with a Cloudflare API token (Workers
+KV: Edit scope, nothing broader) that William created himself and set as
+`CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID` environment variables - never
+generated or handled on his behalf.
 
-**Why driver.py can't push to Cloudflare on its own yet:** the deployment
-above was done using this session's own Cloudflare account access (an
-MCP-level connection scoped to the conversation), which a plain Python
-script running unattended via Task Scheduler has no way to reuse. For
-`driver.py` to push updates itself, it needs its own credential - either:
-
-1. **A Cloudflare API token** (Workers KV: Edit scope, nothing broader) set
-   as an environment variable William creates himself in the Cloudflare
-   dashboard (Account Home -> API Tokens). Not something to generate or
-   store on his behalf - this is his to create.
-2. Once that exists, add a small best-effort step to `driver.py` (same
-   pattern as `_notify` - never let a sync failure break a successful
-   simulate/evolve run) that PUTs the current `world.json` to
-   `.../storage/kv/namespaces/69dfa0f55b53489e96e0b4e42a4a862d/values/world.json`
-   after every simulate tick, and `changelog.md`/`lore.md` after evolve
-   commits or writes a reflection.
-
-Until that exists, refreshing the public snapshot means manually re-running
-the upload steps below.
+Same failure-handling shape as `_notify`: wrapped in try/except, a no-op if
+the env vars aren't set, and a sync failure never breaks an otherwise-
+successful simulate/evolve run. Unlike `_notify`, sync failures ARE logged
+(to `logs/simulate.log` / `logs/evolve.log`) since a silently-stale public
+site is worth being able to debug. Verified live 2026-09-05: a manually
+triggered simulate tick showed up on the public site within seconds.
 
 ## How the initial deploy actually got built (read before repeating it)
 
