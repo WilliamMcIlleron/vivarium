@@ -110,6 +110,17 @@ def test_traits_persist_through_serialization():
     assert restored.creatures[0].traits == {"boldness": 0.7}
 
 
+def test_extinct_grazers_can_migrate_back(monkeypatch):
+    # Without this, a wiped-out grazer population is permanent - hunters
+    # only eat grazers, never resources, so they'd starve out too with
+    # nothing left to bring either species back.
+    monkeypatch.setattr(eco, "GRAZER_MIGRATION_RATE", 1.0)  # force it for the test
+    hunter = Creature(id="h1", x=0, y=0, energy=50, speed=1, sense_range=5, species="hunter")
+    world = World(tick=0, creatures=[hunter], resources=[])
+    world.step()
+    assert any(c.species == "grazer" for c in world.creatures)
+
+
 def test_registered_trait_spawns_with_default_and_mutates_in_bounds(monkeypatch):
     # TRAIT_REGISTRY is empty by design (framework, not content) - simulate
     # evolve having added a trait, and verify the generic machinery handles

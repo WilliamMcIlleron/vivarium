@@ -38,10 +38,16 @@ REPRODUCE = {
     "hunter": {"threshold": 110, "cost": 55},
 }
 
-# If hunters die out entirely, a small per-tick chance of one migrating back
-# in - otherwise a single bad early run permanently turns this into a
-# single-species world, which defeats the point of having two.
+# If either species dies out entirely, a small per-tick chance of one
+# migrating back in. Without this, grazer extinction was a PERMANENT dead
+# world: hunters only eat grazers, never resources, so a wiped-out grazer
+# population starves the hunters out too with nothing left to bring either
+# species back. Grazer migration is higher since they're the base of the
+# food chain - a lone re-migrated grazer with nothing hunting it yet has a
+# real chance to reproduce before a hunter shows up; a lone re-migrated
+# hunter is much more exposed (no fallback food source at all).
 HUNTER_MIGRATION_RATE = 0.02
+GRAZER_MIGRATION_RATE = 0.05
 
 SPECIES = ("grazer", "hunter")
 
@@ -144,6 +150,13 @@ class World:
         ):
             self.creatures.append(_spawn_creature("hunter"))
             self.events.append("a hunter migrates into the world")
+
+        if (
+            not any(c.species == "grazer" for c in self.creatures)
+            and random.random() < GRAZER_MIGRATION_RATE
+        ):
+            self.creatures.append(_spawn_creature("grazer"))
+            self.events.append("a grazer migrates into the world")
 
         grazers = [c for c in self.creatures if c.species == "grazer"]
         hunters = [c for c in self.creatures if c.species == "hunter"]
