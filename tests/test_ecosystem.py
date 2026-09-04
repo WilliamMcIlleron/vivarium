@@ -3,6 +3,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import rules.ecosystem as eco
 from rules.ecosystem import Creature, World
 
 
@@ -87,3 +88,38 @@ def test_old_save_without_terrain_gets_one_generated():
     world = World.from_dict({"tick": 5, "creatures": [], "resources": []})
     assert len(world.terrain) == 40
     assert all(len(row) == 40 for row in world.terrain)
+
+
+def test_old_save_without_traits_gets_empty_dict():
+    world = World.from_dict({
+        "tick": 5,
+        "creatures": [
+            {"id": "a", "x": 1, "y": 1, "energy": 30, "speed": 1, "sense_range": 5}
+        ],
+        "resources": [],
+    })
+    assert world.creatures[0].traits == {}
+    assert world.creatures[0].trait("nonexistent") == 0.0
+
+
+def test_traits_persist_through_serialization():
+    world = World.new()
+    world.creatures[0].traits = {"boldness": 0.7}
+    data = world.to_dict()
+    restored = World.from_dict(data)
+    assert restored.creatures[0].traits == {"boldness": 0.7}
+
+
+def test_registered_trait_spawns_with_default_and_mutates_in_bounds(monkeypatch):
+    # TRAIT_REGISTRY is empty by design (framework, not content) - simulate
+    # evolve having added a trait, and verify the generic machinery handles
+    # it correctly without any trait-specific code.
+    monkeypatch.setitem(eco.TRAIT_REGISTRY, "boldness", (0.5, 0.1, 0.0, 1.0))
+
+    creature = eco._spawn_creature("grazer")
+    assert creature.trait("boldness") == 0.5
+
+    for _ in range(200):
+        child = eco._reproduce(creature)
+        assert 0.0 <= child.trait("boldness") <= 1.0
+        creature = child

@@ -13,6 +13,8 @@ PROTECTED.md
 state/budget.json
 state/world.json
 state/changelog.md
+state/lore.md
+state/notable_events.log
 state/paused.py
 tests/
 PAUSED

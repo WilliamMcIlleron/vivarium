@@ -31,6 +31,18 @@ BUDGET_PATH = STATE / "budget.json"
 PROTECTED_PATH = ROOT / "PROTECTED.md"
 PAUSED_PATH = ROOT / "PAUSED"
 NOTIFY_SCRIPT = ROOT / "notify_windows.ps1"
+NOTABLE_EVENTS_PATH = STATE / "notable_events.log"
+LORE_PATH = STATE / "lore.md"
+
+# Events worth surfacing to evolve as real signal, distinct from routine
+# per-tick noise (births/deaths happen constantly and aren't notable on
+# their own).
+NOTABLE_EVENT_MARKERS = ("EXTINCTION", "GRAZERS EXTINCT", "HUNTERS EXTINCT", "migrates into the world")
+
+# Roughly once a week, evolve writes a reflection instead of a code change -
+# tracked by calendar days, not run count, so it stays "weekly" regardless
+# of how many times/day evolve actually fires.
+REFLECTION_INTERVAL_DAYS = 7
 
 
 def _make_logger(name: str) -> logging.Logger:
@@ -81,9 +93,20 @@ def cmd_simulate() -> None:
     if world.events:
         for e in world.events[:5]:
             log.info(f"  - {e}")
+    _record_notable_events(world)
     if d["population"] == 0:
         log.info("Population extinct. `evolve` runs will see this and should treat")
         log.info("recovery as the top-priority goal on the next run.")
+
+
+def _record_notable_events(world: World) -> None:
+    notable = [e for e in world.events if any(m in e for m in NOTABLE_EVENT_MARKERS)]
+    if not notable:
+        return
+    stamp = datetime.datetime.now().isoformat(timespec="seconds")
+    new_lines = [f"{stamp} tick {world.tick}: {e}" for e in notable]
+    existing = NOTABLE_EVENTS_PATH.read_text().splitlines() if NOTABLE_EVENTS_PATH.exists() else []
+    NOTABLE_EVENTS_PATH.write_text("\n".join((existing + new_lines)[-100:]) + "\n")
 
 
 def _load_world() -> World:
@@ -104,6 +127,13 @@ simulation. Respond with ONLY a JSON object, no markdown fences, no preamble.
 
 Current world state (summary):
 {world_summary}
+
+Genome snapshot (per-species averages, so you can see what's actually \
+dominant right now, not just population counts):
+{genome_stats}
+
+Recent notable events (extinctions, migrations - not routine births/deaths):
+{notable_events}
 
 Recent changelog (most recent entries last):
 {changelog_tail}
@@ -136,6 +166,11 @@ requirements.txt is off-limits, so don't propose anything that needs a pip \
 package.
 - Pick ONE meaningful change. Do not attempt several goals from the goals \
 file at once.
+- rules/ecosystem.py has an extensible genome: Creature.traits is a dict, \
+and TRAIT_REGISTRY (name -> (default, mutation_step, min, max)) makes \
+whatever's in it mutate and inherit automatically. Adding a new gene is one \
+entry there plus behavior code that reads creature.trait("name") - you \
+don't need to touch _reproduce/_spawn_creature by hand for it.
 
 Respond with exactly this JSON shape:
 {{
@@ -143,6 +178,34 @@ Respond with exactly this JSON shape:
   "goals_update": "full new content of state/goals.md, or null if unchanged",
   "changelog_entry": "1-3 sentences: what you changed and why"
 }}
+"""
+
+REFLECTION_PROMPT_TEMPLATE = """\
+You are writing a short field-journal entry about an artificial-life world \
+you've been quietly observing and modifying - not proposing a code change \
+this time. Write like a naturalist or chronicler: a few grounded paragraphs, \
+evocative but built from what the data actually shows, not invented drama. \
+Respond with plain prose only - no JSON, no markdown fences, no headers.
+
+Current world state:
+{world_summary}
+
+Genome snapshot (per-species averages):
+{genome_stats}
+
+Recent notable events:
+{notable_events}
+
+Recent engineering changelog (most recent last):
+{changelog_tail}
+
+Previous chronicle entries (most recent last, for continuity - build on \
+what's already been observed, don't repeat it):
+{lore_tail}
+
+Write 150-300 words. Notice something specific and true about this world \
+right now - a population trend, a dominant trait, a pattern in the hunts, \
+how long since the last real change - not generic scene-setting.
 """
 
 
@@ -162,19 +225,72 @@ def cmd_evolve() -> None:
         return
 
     world = _load_world()
+    _record_population_history(budget, world)
+
+    if _should_reflect(budget):
+        _run_reflection(world, budget, log)
+    else:
+        _run_code_change(world, budget, log)
+
+
+def _should_reflect(budget: dict) -> bool:
+    last = budget.get("last_reflection_date")
+    if last is None:
+        return False  # nothing to reflect on yet - let a real history build up first
+    days_since = (datetime.date.today() - datetime.date.fromisoformat(last)).days
+    return days_since >= REFLECTION_INTERVAL_DAYS
+
+
+def _record_population_history(budget: dict, world: World) -> None:
+    d = world.to_dict()
+    history = budget.get("population_history", [])
+    history.append({"tick": world.tick, "grazers": d["grazers"], "hunters": d["hunters"]})
+    budget["population_history"] = history[-14:]
+
+
+def _genome_stats(world: World) -> dict:
+    from rules.ecosystem import TRAIT_REGISTRY
+
+    stats = {}
+    for species in ("grazer", "hunter"):
+        members = [c for c in world.creatures if c.species == species]
+        if not members:
+            continue
+        entry = {
+            "avg_speed": round(sum(c.speed for c in members) / len(members), 2),
+            "avg_sense_range": round(sum(c.sense_range for c in members) / len(members), 2),
+        }
+        for name in TRAIT_REGISTRY:
+            entry[f"avg_{name}"] = round(sum(c.trait(name) for c in members) / len(members), 3)
+        stats[species] = entry
+    return stats
+
+
+def _shared_context(world: World, budget: dict) -> dict:
     summary = world.to_dict()
-    prompt = EVOLVE_PROMPT_TEMPLATE.format(
-        world_summary=json.dumps(
+    return {
+        "world_summary": json.dumps(
             {
                 "tick": summary["tick"],
                 "population": summary["population"],
                 "grazers": summary["grazers"],
                 "hunters": summary["hunters"],
                 "resources": len(world.resources),
+                # exclude the entry _record_population_history just added
+                # for this run - the current tick/counts above already cover it.
+                "recent_population_history": budget.get("population_history", [])[:-1],
             },
             indent=2,
         ),
-        changelog_tail=_tail(CHANGELOG_PATH, 30),
+        "genome_stats": json.dumps(_genome_stats(world), indent=2),
+        "notable_events": _tail(NOTABLE_EVENTS_PATH, 20),
+        "changelog_tail": _tail(CHANGELOG_PATH, 30),
+    }
+
+
+def _run_code_change(world: World, budget: dict, log: logging.Logger) -> None:
+    prompt = EVOLVE_PROMPT_TEMPLATE.format(
+        **_shared_context(world, budget),
         goals=GOALS_PATH.read_text(),
         ecosystem_source=(ROOT / "rules" / "ecosystem.py").read_text(),
         viewer_source=(ROOT / "viewer" / "index.html").read_text(),
@@ -185,14 +301,7 @@ def cmd_evolve() -> None:
 
     backend = get_backend()
     raw = backend.complete(prompt)
-
-    # Count this against the daily budget the moment the LLM call happens -
-    # that's the expensive/quota-consuming step, regardless of whether the
-    # proposal ends up valid or passes tests. Otherwise repeated rejected
-    # proposals are free to retry and can burn your whole session on nothing.
-    budget["runs_today"] += 1
-    budget["total_evolve_runs"] += 1
-    _save_budget(budget)
+    _spend_budget(budget)
 
     proposal = _parse_proposal(raw)
     if proposal is None:
@@ -225,6 +334,47 @@ def cmd_evolve() -> None:
     _git_commit(proposal["changelog_entry"])
     log.info(f"evolve run committed: {proposal['changelog_entry']}")
     _notify("Vivarium evolved", proposal["changelog_entry"])
+
+
+def _run_reflection(world: World, budget: dict, log: logging.Logger) -> None:
+    prompt = REFLECTION_PROMPT_TEMPLATE.format(
+        **_shared_context(world, budget),
+        lore_tail=_tail(LORE_PATH, 60),
+    )
+
+    backend = get_backend()
+    raw = backend.complete(prompt)
+    _spend_budget(budget)
+
+    entry = raw.strip()
+    if not entry:
+        msg = "evolve run FAILED: reflection came back empty."
+        _append_changelog(msg)
+        log.error(msg)
+        sys.exit(1)
+
+    stamp = datetime.datetime.now().isoformat(timespec="seconds")
+    with LORE_PATH.open("a") as f:
+        f.write(f"\n## {stamp}\n\n{entry}\n")
+
+    budget["last_reflection_date"] = datetime.date.today().isoformat()
+    _save_budget(budget)
+
+    _append_changelog(f"evolve run: wrote a reflection to state/lore.md ({len(entry)} chars).")
+    _git_commit("weekly reflection")
+    log.info("evolve run: reflection written to state/lore.md")
+    _notify("Vivarium reflects", entry[:200])
+
+
+def _spend_budget(budget: dict) -> None:
+    """Counts an evolve call against the daily budget the moment the LLM
+    call happens - that's the expensive/quota-consuming step, regardless of
+    what happens after. Otherwise repeated rejected proposals are free to
+    retry and can burn your whole session on nothing.
+    """
+    budget["runs_today"] += 1
+    budget["total_evolve_runs"] += 1
+    _save_budget(budget)
 
 
 def _parse_proposal(raw: str) -> dict | None:
@@ -378,8 +528,10 @@ def _append_changelog(entry: str) -> None:
 
 
 def _tail(path: Path, lines: int) -> str:
+    if not path.exists():
+        return "(none yet)"
     all_lines = path.read_text().splitlines()
-    return "\n".join(all_lines[-lines:])
+    return "\n".join(all_lines[-lines:]) or "(none yet)"
 
 
 # --------------------------------------------------------------------- cli --

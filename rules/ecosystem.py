@@ -50,6 +50,15 @@ SPECIES = ("grazer", "hunter")
 # to regenerate or read. step() never touches it.
 TERRAIN_CODES = "wsgf"  # water, sand, grass, forest
 
+# Extensible genome: name -> (default, mutation_step, min, max). speed and
+# sense_range stay first-class Creature fields since core movement code
+# reads them directly everywhere - this registry is for ADDITIONAL traits,
+# so adding a new mutating gene is one line here plus whatever behavior code
+# actually uses it, instead of editing Creature/_spawn_creature/_reproduce
+# separately for each one. Empty on purpose: this is the framework, not the
+# content - what traits exist and what they do is for evolve to decide.
+TRAIT_REGISTRY: dict[str, tuple[float, float, float, float]] = {}
+
 
 @dataclass
 class Creature:
@@ -61,9 +70,14 @@ class Creature:
     sense_range: int     # how far it can "see" food (grazer) or prey (hunter)
     species: str = "grazer"
     age: int = 0
+    traits: dict = field(default_factory=dict)  # extra genome, see TRAIT_REGISTRY
+
+    def trait(self, name: str) -> float:
+        default = TRAIT_REGISTRY[name][0] if name in TRAIT_REGISTRY else 0.0
+        return self.traits.get(name, default)
 
     def genes(self) -> dict:
-        return {"speed": self.speed, "sense_range": self.sense_range}
+        return {"speed": self.speed, "sense_range": self.sense_range, **self.traits}
 
 
 @dataclass
@@ -261,6 +275,7 @@ def _generate_terrain() -> list[str]:
 
 def _spawn_creature(species: str = "grazer") -> Creature:
     speed = 2 if species == "hunter" else 1
+    traits = {name: default for name, (default, _step, _lo, _hi) in TRAIT_REGISTRY.items()}
     return Creature(
         id=str(uuid.uuid4()),
         x=random.randrange(GRID_SIZE),
@@ -269,6 +284,7 @@ def _spawn_creature(species: str = "grazer") -> Creature:
         speed=speed,
         sense_range=5,
         species=species,
+        traits=traits,
     )
 
 
@@ -333,6 +349,17 @@ def _reproduce(parent: Creature) -> Creature:
         speed = max(1, speed + random.choice([-1, 1]))
     if random.random() < MUTATION_RATE:
         sense_range = max(1, sense_range + random.choice([-1, 1]))
+
+    # Generic mutation for whatever's in TRAIT_REGISTRY - adding a new gene
+    # there is enough to make it inherit and mutate correctly, no extra code
+    # needed here.
+    new_traits = dict(parent.traits)
+    for name, (default, step, lo, hi) in TRAIT_REGISTRY.items():
+        value = new_traits.get(name, default)
+        if random.random() < MUTATION_RATE:
+            value = _clamp(value + random.choice([-step, step]), lo, hi)
+        new_traits[name] = value
+
     cost = REPRODUCE[parent.species]["cost"]
     return Creature(
         id=str(uuid.uuid4()),
@@ -342,6 +369,7 @@ def _reproduce(parent: Creature) -> Creature:
         speed=speed,
         sense_range=sense_range,
         species=parent.species,
+        traits=new_traits,
     )
 
 

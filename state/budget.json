@@ -1,8 +1,10 @@
 {
-  "max_evolve_runs_per_day": 1,
+  "max_evolve_runs_per_day": 3,
   "max_diff_files_per_run": 5,
   "max_diff_lines_per_run": 350,
   "runs_today": 1,
   "last_run_date": "2026-09-04",
-  "total_evolve_runs": 4
+  "total_evolve_runs": 4,
+  "last_reflection_date": "2026-09-04",
+  "population_history": []
 }

@@ -7,6 +7,27 @@ changelog entry.
 
 ## Current focus
 
+- **Genome framework** (2026-09-04): `rules/ecosystem.py` has `TRAIT_REGISTRY`
+  (name -> (default, mutation_step, min, max)) and `Creature.traits` - a
+  generic, extensible genome. `speed` and `sense_range` stay first-class
+  fields since movement code reads them directly everywhere, but any NEW
+  mutating trait only needs one entry in `TRAIT_REGISTRY` plus behavior code
+  that reads `creature.trait("name")` - inheritance and mutation happen
+  automatically, no need to touch `_reproduce`/`_spawn_creature` by hand.
+  `TRAIT_REGISTRY` is deliberately empty - this is the framework, not the
+  content. The first real trait you add here (tied to real behavior, not
+  just existing for its own sake) is a legitimate "one meaningful change."
+- **You now see more than population counts**: the prompt includes a genome
+  snapshot (per-species trait averages), recent notable events (extinctions,
+  migrations), and recent population history. Use them - if grazers have
+  been trending toward zero for several runs, that's a more urgent signal
+  than anything else in this file.
+- **Reflection runs**: roughly once a week, instead of a code change, you'll
+  be asked to write a short chronicle entry into `state/lore.md` instead -
+  a first-person field-journal reflection on what this world has actually
+  become, distinct from the engineering `changelog.md`. Shown in the viewer
+  as "latest chronicle." Write it like you're actually looking at this
+  specific world's specific state, not a generic template.
 - The world now has a terrain layer (water/sand/grass/forest, generated once at
   world creation, rendered in `viewer/index.html`) plus a day/night cycle and
   drifting fog for atmosphere. This is fixed "engine" scaffolding, not content -
