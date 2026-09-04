@@ -1,6 +1,7 @@
-# Self-Evolving World
+# Vivarium
 
-A small artificial-life ecosystem that runs itself and rewrites its own rules over time.
+A small artificial-life ecosystem that runs itself and rewrites its own rules over time -
+named for the enclosures built to keep and observe living things.
 
 Two separate loops, deliberately kept apart:
 
