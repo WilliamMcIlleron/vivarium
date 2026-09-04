@@ -46,6 +46,15 @@ changelog entry.
   - A cost/benefit tradeoff gene beyond speed/sense_range (e.g. size vs. energy
     efficiency).
   - Environmental hazards (regions of the grid that drain energy faster).
+  - Lineage tracking: give Creature a `parent_id`, so a family tree exists even
+    if nothing reads it yet. Once it does, worth surfacing which lineage is
+    currently dominant, or how many generations deep the oldest living line
+    goes - that's a much more interesting fact about the world than "12
+    grazers" is on its own.
+  - A "notable creature" callout in the viewer stats bar: the oldest living
+    creature, or the one with the most descendants (needs lineage tracking
+    above first). Turns the population count into an actual story about a
+    specific creature, not just a number that goes up and down.
 - Longer-term, speculative idea, only worth picking up once the above feels
   exhausted: connect resource spawn rate to a real weather API for a real city,
   so the world has an actual tether to reality instead of pure randomness. Only

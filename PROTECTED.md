@@ -21,3 +21,6 @@ PAUSED
 requirements.txt
 crontab.example
 README.md
+notify_windows.ps1
+SCHEDULING_WINDOWS.md
+logs/

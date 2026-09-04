@@ -12,6 +12,8 @@ PROTECTED.md — evolve can never modify it.
 import datetime
 import difflib
 import json
+import logging
+import logging.handlers
 import subprocess
 import sys
 from pathlib import Path
@@ -21,12 +23,40 @@ from rules.ecosystem import World
 
 ROOT = Path(__file__).parent
 STATE = ROOT / "state"
+LOGS_DIR = ROOT / "logs"
 WORLD_PATH = STATE / "world.json"
 GOALS_PATH = STATE / "goals.md"
 CHANGELOG_PATH = STATE / "changelog.md"
 BUDGET_PATH = STATE / "budget.json"
 PROTECTED_PATH = ROOT / "PROTECTED.md"
 PAUSED_PATH = ROOT / "PAUSED"
+NOTIFY_SCRIPT = ROOT / "notify_windows.ps1"
+
+
+def _make_logger(name: str) -> logging.Logger:
+    """Logs to both a rotating file (so scheduled runs leave a trail even
+    though Task Scheduler captures no stdout) and the console (so manual
+    runs still see output as before). Capped at 512KB x 3 backups per log -
+    simulate runs every 30 min forever, so this needs a ceiling.
+    """
+    LOGS_DIR.mkdir(exist_ok=True)
+    logger = logging.getLogger(name)
+    if logger.handlers:  # avoid duplicate handlers if called twice in-process
+        return logger
+    logger.setLevel(logging.INFO)
+    fmt = logging.Formatter("%(asctime)s %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+
+    file_handler = logging.handlers.RotatingFileHandler(
+        LOGS_DIR / f"{name}.log", maxBytes=512_000, backupCount=3
+    )
+    file_handler.setFormatter(fmt)
+    logger.addHandler(file_handler)
+
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(console_handler)
+
+    return logger
 
 # What evolve is allowed to write, independent of PROTECTED.md. PROTECTED.md is
 # a denylist (documents specific paths that must never change); this is an
@@ -39,20 +69,21 @@ ALLOWED_EXACT = ("state/goals.md",)
 # ---------------------------------------------------------------- simulate --
 
 def cmd_simulate() -> None:
+    log = _make_logger("simulate")
     world = _load_world()
     world.step()
     _save_world(world)
     d = world.to_dict()
-    print(
+    log.info(
         f"tick {world.tick}: population={d['population']} "
         f"(grazers={d['grazers']}, hunters={d['hunters']}) events={len(world.events)}"
     )
     if world.events:
         for e in world.events[:5]:
-            print(f"  - {e}")
+            log.info(f"  - {e}")
     if d["population"] == 0:
-        print("Population extinct. `evolve` runs will see this and should treat")
-        print("recovery as the top-priority goal on the next run.")
+        log.info("Population extinct. `evolve` runs will see this and should treat")
+        log.info("recovery as the top-priority goal on the next run.")
 
 
 def _load_world() -> World:
@@ -116,8 +147,9 @@ Respond with exactly this JSON shape:
 
 
 def cmd_evolve() -> None:
+    log = _make_logger("evolve")
     if PAUSED_PATH.exists():
-        print("PAUSED file present - evolve will not run. Delete it to resume.")
+        log.info("PAUSED file present - evolve will not run. Delete it to resume.")
         return
 
     budget = _load_budget()
@@ -126,7 +158,7 @@ def cmd_evolve() -> None:
         budget["runs_today"] = 0
         budget["last_run_date"] = today
     if budget["runs_today"] >= budget["max_evolve_runs_per_day"]:
-        print(f"Daily evolve budget ({budget['max_evolve_runs_per_day']}) already used today.")
+        log.info(f"Daily evolve budget ({budget['max_evolve_runs_per_day']}) already used today.")
         return
 
     world = _load_world()
@@ -164,12 +196,16 @@ def cmd_evolve() -> None:
 
     proposal = _parse_proposal(raw)
     if proposal is None:
-        _append_changelog("evolve run FAILED: could not parse model response as JSON.")
+        msg = "evolve run FAILED: could not parse model response as JSON."
+        _append_changelog(msg)
+        log.error(msg)
         sys.exit(1)
 
     ok, reason = _validate_proposal(proposal, budget)
     if not ok:
-        _append_changelog(f"evolve run REJECTED: {reason}")
+        msg = f"evolve run REJECTED: {reason}"
+        _append_changelog(msg)
+        log.warning(msg)
         sys.exit(1)
 
     backups = _write_files(proposal["files"])
@@ -177,9 +213,9 @@ def cmd_evolve() -> None:
 
     if not tests_ok:
         _restore_files(backups)
-        _append_changelog(
-            f"evolve run REVERTED (tests failed): attempted - {proposal['changelog_entry']}"
-        )
+        msg = f"evolve run REVERTED (tests failed): attempted - {proposal['changelog_entry']}"
+        _append_changelog(msg)
+        log.warning(msg)
         sys.exit(1)
 
     if proposal.get("goals_update"):
@@ -187,7 +223,8 @@ def cmd_evolve() -> None:
 
     _append_changelog(proposal["changelog_entry"])
     _git_commit(proposal["changelog_entry"])
-    print("evolve run committed:", proposal["changelog_entry"])
+    log.info(f"evolve run committed: {proposal['changelog_entry']}")
+    _notify("Vivarium evolved", proposal["changelog_entry"])
 
 
 def _parse_proposal(raw: str) -> dict | None:
@@ -287,8 +324,9 @@ def _run_tests() -> bool:
         text=True,
     )
     if result.returncode != 0:
-        print(result.stdout)
-        print(result.stderr)
+        log = logging.getLogger("evolve")
+        log.warning(result.stdout)
+        log.warning(result.stderr)
     return result.returncode == 0
 
 
@@ -297,6 +335,27 @@ def _git_commit(message: str) -> None:
         return
     subprocess.run(["git", "add", "-A"], cwd=ROOT)
     subprocess.run(["git", "commit", "-m", f"evolve: {message}"], cwd=ROOT)
+
+
+def _notify(title: str, message: str) -> None:
+    """Fires a Windows toast when evolve commits a real change. Best-effort:
+    a notification failure (no PowerShell, non-Windows, quiet hours, etc.)
+    must never break an already-successful evolve run.
+    """
+    if sys.platform != "win32" or not NOTIFY_SCRIPT.exists():
+        return
+    try:
+        subprocess.run(
+            [
+                "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                "-File", str(NOTIFY_SCRIPT), "-Title", title, "-Message", message,
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            timeout=15,
+        )
+    except Exception:
+        pass
 
 
 def _protected_paths() -> list[str]:

@@ -72,6 +72,24 @@
     border-right: 4px solid transparent;
     border-bottom: 8px solid;
   }
+  #latest-evolve {
+    margin-top: 22px;
+    width: 100%;
+    max-width: 440px;
+    border-top: 1px solid #1a2b20;
+    padding-top: 12px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  #latest-evolve .label {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 10px;
+    color: var(--muted);
+    opacity: 0.7;
+  }
+  #latest-evolve .stamp { color: var(--text); font-weight: 600; margin-left: 6px; }
+  #latest-evolve .entry { margin-top: 4px; line-height: 1.5; color: var(--text); }
 </style>
 </head>
 <body>
@@ -85,6 +103,7 @@
     <span class="swatch"><span class="tri" style="border-bottom-color:var(--hunter-high)"></span>hunter (brighter = more energy)</span>
     <span class="swatch"><span class="dot" style="background:var(--resource)"></span>resource</span>
   </div>
+  <div id="latest-evolve"></div>
 
 <script>
 const GRID = 40;
@@ -197,6 +216,29 @@ async function fetchWorld() {
   }
 }
 
+const latestEvolveEl = document.getElementById('latest-evolve');
+
+// changelog.md is append-only markdown, "## <timestamp>" sections - grab
+// whichever one is last and show it. Polled far less often than world.json
+// since it only changes once a day.
+async function fetchLatestEvolve() {
+  try {
+    const res = await fetch('../state/changelog.md?_=' + Date.now());
+    const text = await res.text();
+    const sections = text.split(/\n##\s+/).slice(1);
+    if (!sections.length) return;
+    const last = sections[sections.length - 1];
+    const breakAt = last.indexOf('\n');
+    const stamp = (breakAt === -1 ? last : last.slice(0, breakAt)).trim();
+    const body = (breakAt === -1 ? '' : last.slice(breakAt)).trim();
+    latestEvolveEl.innerHTML =
+      `<span class="label">latest evolve</span><span class="stamp">${stamp}</span>` +
+      `<div class="entry">${body.replace(/</g, '&lt;')}</div>`;
+  } catch (e) {
+    // non-critical - just leave whatever was last shown (or nothing)
+  }
+}
+
 function draw(now) {
   requestAnimationFrame(draw);
   const world = latestWorld;
@@ -276,6 +318,8 @@ function draw(now) {
 
 fetchWorld();
 setInterval(fetchWorld, 3000);
+fetchLatestEvolve();
+setInterval(fetchLatestEvolve, 30000);
 requestAnimationFrame(draw);
 </script>
 </body>
