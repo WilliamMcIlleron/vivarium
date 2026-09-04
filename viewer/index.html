@@ -10,6 +10,8 @@
     --grid-line: rgba(127, 217, 155, 0.05);
     --creature-low: #3f6b52;
     --creature-high: #9fffc4;
+    --hunter-low: #6b1f1f;
+    --hunter-high: #ff8f6b;
     --resource: #e8c07d;
     --text: #cfe8d6;
     --muted: #5c7266;
@@ -64,6 +66,12 @@
   }
   .swatch { display: inline-flex; align-items: center; gap: 5px; }
   .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  .tri {
+    width: 0; height: 0; display: inline-block;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-bottom: 8px solid;
+  }
 </style>
 </head>
 <body>
@@ -73,7 +81,8 @@
   </div>
   <div id="stats">loading...</div>
   <div id="legend">
-    <span class="swatch"><span class="dot" style="background:var(--creature-high)"></span>creature (brighter = more energy)</span>
+    <span class="swatch"><span class="dot" style="background:var(--creature-high)"></span>grazer (brighter = more energy)</span>
+    <span class="swatch"><span class="tri" style="border-bottom-color:var(--hunter-high)"></span>hunter (brighter = more energy)</span>
     <span class="swatch"><span class="dot" style="background:var(--resource)"></span>resource</span>
   </div>
 
@@ -137,9 +146,10 @@ async function render() {
     ctx.fill();
   }
 
-  // creatures: circle, brightness + size scale with energy, faint glow
+  // grazers: circle, brightness + size scale with energy, faint glow
   const creatures = world.creatures || [];
   for (const c of creatures) {
+    if (c.species === 'hunter') continue;
     const t = Math.max(0, Math.min(1, (c.energy ?? 30) / 80));
     const color = lerpColor('#3f6b52', '#9fffc4', t);
     const r = cell * (0.16 + 0.14 * t);
@@ -155,9 +165,36 @@ async function render() {
     ctx.shadowBlur = 0;
   }
 
+  // hunters: triangle (a predator silhouette, distinct from the grazer dot),
+  // red/orange ramp instead of green so the two species read apart at a
+  // glance even before you know the shape convention.
+  for (const c of creatures) {
+    if (c.species !== 'hunter') continue;
+    const t = Math.max(0, Math.min(1, (c.energy ?? 30) / 80));
+    const color = lerpColor('#6b1f1f', '#ff8f6b', t);
+    const r = cell * (0.22 + 0.14 * t);
+    const cx = c.x * cell + cell / 2;
+    const cy = c.y * cell + cell / 2;
+
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 5 + 7 * t;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - r);
+    ctx.lineTo(cx + r * 0.87, cy + r * 0.5);
+    ctx.lineTo(cx - r * 0.87, cy + r * 0.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
+  const grazerCount = creatures.filter(c => c.species !== 'hunter').length;
+  const hunterCount = creatures.filter(c => c.species === 'hunter').length;
+
   stats.innerHTML =
     `tick <b>${world.tick}</b>` +
-    `<span>population <b>${world.population}</b></span>` +
+    `<span>grazers <b>${world.grazers ?? grazerCount}</b></span>` +
+    `<span>hunters <b>${world.hunters ?? hunterCount}</b></span>` +
     `<span>resources <b>${(world.resources || []).length}</b></span>`;
 }
 

@@ -11,7 +11,10 @@ driver.py
 config.py
 PROTECTED.md
 state/budget.json
+state/world.json
+state/changelog.md
 state/paused.py
+tests/
 PAUSED
 .github/workflows/
 .git/

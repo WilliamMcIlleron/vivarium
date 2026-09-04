@@ -14,6 +14,10 @@ Two separate loops, deliberately kept apart:
 This split exists so the world can "live" continuously for free, while the part that
 costs money/quota (the self-modification) stays deliberately infrequent and controlled.
 
+Current model: two species share the grid - **grazers** (eat resources) and **hunters**
+(eat grazers). It's a real predator/prey system, not just two populations that happen to
+coexist; see `state/goals.md` for what's still on the table to add next.
+
 ## Quick start
 
 ```bash
@@ -22,12 +26,15 @@ python driver.py simulate      # one free tick, no LLM
 python driver.py evolve        # one LLM-driven evolution step
 ```
 
-## Running it unattended (local cron, Pro plan)
+## Running it unattended (local schedule, Pro plan)
 
-See `crontab.example`. This uses the official Claude Code CLI (`claude -p`) authenticated
-with your Pro/Max subscription login — no API key needed, no extra cost beyond your
-existing plan. Runs locally on your own machine (see `config.py` for why not GitHub
-Actions on this backend).
+Uses the official Claude Code CLI (`claude -p`) authenticated with your Pro/Max
+subscription login — no API key needed, no extra cost beyond your existing plan. Runs
+locally on your own machine (see `config.py` for why not GitHub Actions on this backend).
+
+- Linux / macOS / WSL: see `crontab.example`.
+- Plain Windows (no WSL): Windows has no `cron` - see `SCHEDULING_WINDOWS.md` for the
+  Task Scheduler equivalent.
 
 ## Upgrading to the API later
 
@@ -57,13 +64,19 @@ PROTECTED.md            paths evolve is not allowed to touch
 tests/                  must pass before an evolve change is committed
 viewer/index.html       open this to watch the world (reads state/world.json)
 PAUSED                  create this empty file to freeze evolve immediately
+crontab.example         unattended scheduling on Linux/macOS/WSL
+SCHEDULING_WINDOWS.md   unattended scheduling on plain Windows (Task Scheduler)
 ```
 
 ## Guardrails (enforced in code, not just prompted)
 
-1. `PROTECTED.md` paths are diffed against every evolve change; touching one fails the run.
-2. `state/budget.json` caps runs per day / tokens per run; evolve refuses to start over cap.
-3. `tests/` must pass or the change is reverted, never committed.
-4. Diff size cap per evolve run (default 3 files / 150 lines) — forces incremental change.
+1. An allowlist: evolve may only write under `rules/`, `viewer/`, and `state/goals.md` -
+   everything else is rejected even before the `PROTECTED.md` check runs.
+2. `PROTECTED.md` paths are diffed against every evolve change; touching one fails the run.
+3. `state/budget.json` caps runs per day / diff size per run; evolve refuses to start over
+   cap. Diff size is measured as actual added/removed lines against the file on disk, not
+   the file's full length - a small edit to a big file doesn't cost the whole file.
+4. `tests/` must pass or the change is reverted, never committed. `tests/` is itself
+   protected, so evolve can't loosen its own tests to force a pass.
 5. `PAUSED` file, checked first, halts everything.
 6. Every evolve run writes a changelog entry before committing — human-readable trail.

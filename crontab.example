@@ -1,14 +1,21 @@
-# Example crontab lines for running the world locally on your Pro/Max subscription.
-# Edit the path, then install with: crontab -e  (paste these lines in)
+# Example crontab lines for running the world unattended on Linux/macOS/WSL,
+# using your Pro/Max subscription (no API key needed).
+#
+# Windows without WSL has no cron - see SCHEDULING_WINDOWS.md for the native
+# Task Scheduler equivalent instead of this file.
+#
+# Edit WORLD_DIR below, then install with: crontab -e  (paste these lines in)
+
+WORLD_DIR=/path/to/self-evolving-world
 
 # Simulate: free, no LLM call - safe to run often. Every 15 minutes here.
-*/15 * * * * cd /path/to/self-evolving-world && /usr/bin/python3 driver.py simulate >> logs/simulate.log 2>&1
+*/15 * * * * mkdir -p $WORLD_DIR/logs && cd $WORLD_DIR && python3 driver.py simulate >> logs/simulate.log 2>&1
 
 # Evolve: calls Claude via your Pro subscription (config.py, WORLD_BACKEND=cli
 # by default). Keep this infrequent - once a day is the default budget in
 # state/budget.json. Pick a quiet time when you're not also using Claude Code
 # for your own work, since they share the same usage pool.
-0 3 * * * cd /path/to/self-evolving-world && /usr/bin/python3 driver.py evolve >> logs/evolve.log 2>&1
+0 3 * * * mkdir -p $WORLD_DIR/logs && cd $WORLD_DIR && python3 driver.py evolve >> logs/evolve.log 2>&1
 
 # Note: `claude` must already be authenticated (`claude login`) under the same
 # user account that cron runs as. Test with `crontab -l` and a manual

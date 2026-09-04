@@ -7,14 +7,26 @@ changelog entry.
 
 ## Current focus
 
-- The ecosystem is brand new (`rules/ecosystem.py`): one species, one resource type,
-  a fixed grid. It works, but it's simple. Look for the most interesting single
-  next step, not a laundry list.
+- The ecosystem now has two species (`rules/ecosystem.py`): grazers (eat resources)
+  and hunters (eat grazers, flee-and-chase movement, faster but harder to reproduce).
+  Grazers detect hunters using the same `sense_range` gene they use to find food -
+  spotting predators and finding food are the same stat, which is the interesting
+  tension to build on. Look for the most interesting single next step, not a
+  laundry list.
 - Prefer changes that create *emergent* behavior (a new pressure the population has
   to adapt to) over changes that just add content for its own sake.
+- Known balance risk, worth watching and worth fixing if you see it happening: in
+  hand-testing (2026-09-04), roughly a quarter of long runs ended with grazers
+  fully extinct and only an occasional migrant hunter left. A fix that reduces this
+  without re-introducing hunter-driven total extinction is a legitimate "tuning
+  change" - don't feel obligated to solve it in one run, but don't ignore it either
+  if `state/world.json` shows grazers trending toward zero.
 - Good candidate directions, roughly in order of interesting-to-least:
-  - A second resource type with different nutritional value, forcing tradeoffs.
-  - A predator/prey split (a second creature species that eats the first).
+  - A second resource type with different nutritional value, forcing tradeoffs
+    (e.g. a rare high-energy resource hunters could also eat as a fallback, taking
+    some pressure off grazers when hunting is going too well).
+  - Grazer herd behavior: grazers that cluster tend to spot hunters sooner (more
+    eyes) at the cost of competing with each other for the same resources.
   - Seasons or cycles that change resource spawn rate over time.
   - A cost/benefit tradeoff gene beyond speed/sense_range (e.g. size vs. energy
     efficiency).

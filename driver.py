@@ -10,6 +10,7 @@ PROTECTED.md — evolve can never modify it.
 """
 
 import datetime
+import difflib
 import json
 import subprocess
 import sys
@@ -27,6 +28,13 @@ BUDGET_PATH = STATE / "budget.json"
 PROTECTED_PATH = ROOT / "PROTECTED.md"
 PAUSED_PATH = ROOT / "PAUSED"
 
+# What evolve is allowed to write, independent of PROTECTED.md. PROTECTED.md is
+# a denylist (documents specific paths that must never change); this is an
+# allowlist (only these paths may change at all). Both are checked - a path
+# has to pass the allowlist AND not match the denylist.
+ALLOWED_PREFIXES = ("rules/", "viewer/")
+ALLOWED_EXACT = ("state/goals.md",)
+
 
 # ---------------------------------------------------------------- simulate --
 
@@ -34,12 +42,15 @@ def cmd_simulate() -> None:
     world = _load_world()
     world.step()
     _save_world(world)
-    pop = len(world.creatures)
-    print(f"tick {world.tick}: population={pop} events={len(world.events)}")
+    d = world.to_dict()
+    print(
+        f"tick {world.tick}: population={d['population']} "
+        f"(grazers={d['grazers']}, hunters={d['hunters']}) events={len(world.events)}"
+    )
     if world.events:
         for e in world.events[:5]:
             print(f"  - {e}")
-    if pop == 0:
+    if d["population"] == 0:
         print("Population extinct. `evolve` runs will see this and should treat")
         print("recovery as the top-priority goal on the next run.")
 
@@ -81,14 +92,17 @@ effect, a new attribute worth distinguishing), you MUST also update \
 viewer/index.html in this same response to render it distinctly - a new \
 color, shape, or size mapping. Do not leave new concepts invisible on screen. \
 Purely internal tuning changes don't require this.
-- Change at most {max_files} files, at most {max_lines} total changed lines.
-- You may write to files under rules/, and to state/goals.md if you want to \
-update the goals themselves. You may create NEW files under rules/ (e.g. a \
-new species file) if that's cleaner than one giant ecosystem.py.
+- Change at most {max_files} files, at most {max_lines} total changed lines \
+(measured as actual added/removed lines against the current file, not full \
+file length - editing a 180-line file by 10 lines costs 10 lines, not 180).
+- You may ONLY write to: files under rules/, files under viewer/, and \
+state/goals.md. Anything else is rejected even if it seems harmless. You may \
+create NEW files under rules/ (e.g. a new species file) if that's cleaner \
+than one giant ecosystem.py.
 - Never touch anything listed in PROTECTED.md: {protected_paths}
-- The simulation must remain pure Python with no new dependencies beyond \
-what's already imported, unless you add the dependency to requirements.txt \
-as part of your file list.
+- The simulation must remain pure Python with no new dependencies - \
+requirements.txt is off-limits, so don't propose anything that needs a pip \
+package.
 - Pick ONE meaningful change. Do not attempt several goals from the goals \
 file at once.
 
@@ -116,8 +130,18 @@ def cmd_evolve() -> None:
         return
 
     world = _load_world()
+    summary = world.to_dict()
     prompt = EVOLVE_PROMPT_TEMPLATE.format(
-        world_summary=json.dumps(world.to_dict()["population"], indent=2),
+        world_summary=json.dumps(
+            {
+                "tick": summary["tick"],
+                "population": summary["population"],
+                "grazers": summary["grazers"],
+                "hunters": summary["hunters"],
+                "resources": len(world.resources),
+            },
+            indent=2,
+        ),
         changelog_tail=_tail(CHANGELOG_PATH, 30),
         goals=GOALS_PATH.read_text(),
         ecosystem_source=(ROOT / "rules" / "ecosystem.py").read_text(),
@@ -184,9 +208,12 @@ def _validate_proposal(proposal: dict, budget: dict) -> tuple[bool, str]:
     if len(files) > budget["max_diff_files_per_run"]:
         return False, f"touched {len(files)} files, max is {budget['max_diff_files_per_run']}"
 
-    total_lines = sum(content.count("\n") + 1 for content in files.values())
-    if total_lines > budget["max_diff_lines_per_run"]:
-        return False, f"{total_lines} lines changed, max is {budget['max_diff_lines_per_run']}"
+    for path in files:
+        if not _path_allowed(path):
+            return False, (
+                f"proposal touches disallowed path: {path} "
+                f"(only rules/, viewer/, and state/goals.md are writable)"
+            )
 
     protected = _protected_paths()
     for path in files:
@@ -195,7 +222,41 @@ def _validate_proposal(proposal: dict, budget: dict) -> tuple[bool, str]:
             if norm == p.strip("/") or norm.startswith(p.strip("/").rstrip("/") + "/"):
                 return False, f"proposal touches protected path: {path}"
 
+    total_lines = sum(_count_changed_lines(path, content) for path, content in files.items())
+    if total_lines > budget["max_diff_lines_per_run"]:
+        return False, f"{total_lines} lines changed, max is {budget['max_diff_lines_per_run']}"
+
     return True, ""
+
+
+def _path_allowed(path: str) -> bool:
+    norm = path.strip("/").replace("\\", "/")
+    if norm in ALLOWED_EXACT:
+        return True
+    return any(norm.startswith(prefix) for prefix in ALLOWED_PREFIXES)
+
+
+def _count_changed_lines(rel_path: str, new_content: str) -> int:
+    """Actual added+removed lines vs. the file on disk, not the file's full length.
+
+    A brand-new file counts every line as added - there's no smaller diff to
+    have. An edit to an existing file only counts lines that actually changed,
+    so a 10-line tweak to a 200-line file costs 10, not 200.
+    """
+    full = ROOT / rel_path
+    if not full.exists():
+        return new_content.count("\n") + 1
+
+    old_lines = full.read_text().splitlines()
+    new_lines = new_content.splitlines()
+    diff = difflib.unified_diff(old_lines, new_lines, n=0)
+    changed = 0
+    for line in diff:
+        if line.startswith(("+++", "---", "@@")):
+            continue
+        if line.startswith("+") or line.startswith("-"):
+            changed += 1
+    return changed
 
 
 def _write_files(files: dict) -> dict:
