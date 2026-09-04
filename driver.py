@@ -540,7 +540,20 @@ if __name__ == "__main__":
     if len(sys.argv) != 2 or sys.argv[1] not in ("simulate", "evolve"):
         print("usage: python driver.py [simulate|evolve]")
         sys.exit(1)
-    if sys.argv[1] == "simulate":
-        cmd_simulate()
-    else:
-        cmd_evolve()
+
+    try:
+        if sys.argv[1] == "simulate":
+            cmd_simulate()
+        else:
+            cmd_evolve()
+    except SystemExit:
+        raise  # sys.exit() calls elsewhere already log their own reason
+    except Exception:
+        # Catch-all for anything NOT already anticipated (a rate-limited or
+        # otherwise failing `claude` CLI call, a network error, etc.) - the
+        # specific failure modes above already log themselves, but an
+        # unexpected crash used to just print a traceback to stderr, which
+        # Task Scheduler discards. That left zero trace of exactly the kind
+        # of failure this logging exists to catch.
+        logging.getLogger(sys.argv[1]).exception(f"{sys.argv[1]} crashed unexpectedly")
+        sys.exit(1)
