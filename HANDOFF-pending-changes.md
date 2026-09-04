@@ -200,13 +200,46 @@ two. Mirror the existing dry-run pattern from earlier today (copy the repo
 to a temp dir, monkeypatch `get_backend`, never test against the real CLI or
 the real repo's git history).
 
+### 7. Make the public Cloudflare deploy actually sync (needs William first)
+
+Public viewer is live at https://vivarium.williamjonahmci.workers.dev/
+(Cloudflare Worker + KV, see `cloudflare/README.md` for the full story), but
+it's a one-time snapshot from 2026-09-04 - `driver.py` has no credential of
+its own to push updates, since the initial deploy used this session's own
+Cloudflare account access, which a plain unattended script can't reuse.
+
+This task is blocked until William creates a Cloudflare API token himself
+(Account Home -> API Tokens, scoped to Workers KV: Edit only - don't create
+or handle this credential on his behalf, it's his to generate). Once he's
+set it as an environment variable (e.g. `CLOUDFLARE_API_TOKEN` and
+`CLOUDFLARE_ACCOUNT_ID`), add a best-effort sync step to `driver.py`:
+
+- After `cmd_simulate` saves `world.json`, PUT its content to
+  `https://api.cloudflare.com/client/v4/accounts/{account_id}/storage/kv/namespaces/69dfa0f55b53489e96e0b4e42a4a862d/values/world.json`
+  (KV namespace already exists, that ID is real and live - reuse it, don't
+  create a new one).
+- After `evolve` commits a change or writes a reflection, sync
+  `changelog.md` and/or `lore.md` the same way.
+- Follow the exact pattern of `_notify` in `driver.py`: wrapped in
+  try/except, silently skipped if the env vars aren't set, and a sync
+  failure must never break an otherwise-successful simulate/evolve run.
+- `viewer.html` itself doesn't need syncing on every tick - it only changes
+  when evolve edits `viewer/index.html`, so sync it only as part of a
+  successful evolve commit that touched that file, not every run.
+
+If the env vars aren't set when you pick this up, just leave this task
+undone and say so - don't build it in a way that requires a credential you
+don't have to test.
+
 ## Order of operations
 
 Tasks 1, 2, 3, 5, 6 have no dependencies on each other - any order. Task 4
 (GitHub push) should happen before anyone acts on the portfolio handoff,
-since that needs the real repo URL. Run `python -m pytest tests/ -q` after
-every task and don't move to the next until it's green - all 15 current
-tests must keep passing throughout (16+ once task 6's test is added).
+since that needs the real repo URL. Task 7 is blocked on William creating a
+credential - skip it until that exists, don't let it hold up the rest. Run
+`python -m pytest tests/ -q` after every task and don't move to the next
+until it's green - all 15 current tests must keep passing throughout (16+
+once task 6's test is added).
 
 ## Do NOT do
 
