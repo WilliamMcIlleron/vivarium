@@ -308,6 +308,11 @@ def _run_code_change(world: World, budget: dict, log: logging.Logger) -> None:
         msg = "evolve run FAILED: could not parse model response as JSON."
         _append_changelog(msg)
         log.error(msg)
+        # The changelog stays short on purpose, but this failure is only
+        # debuggable at all if the actual response is captured somewhere -
+        # log-only, truncated, so a raw markdown-fenced or chatty reply
+        # doesn't disappear without a trace like it did the first time.
+        log.error(f"raw response was:\n{raw[:4000]}")
         sys.exit(1)
 
     ok, reason = _validate_proposal(proposal, budget)

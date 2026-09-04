@@ -49,3 +49,7 @@ extinction within a few hundred ticks, independent of anything predator-related.
 against the grazer's green circle, per the visual parity rule. See
 `state/goals.md` for the known remaining balance risk (grazers going fully
 extinct in a minority of long runs) and what's next.
+
+## 2026-09-04T21:19:48
+
+evolve run FAILED: could not parse model response as JSON.

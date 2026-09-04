@@ -1,92 +1,92 @@
 {
-  "tick": 78,
+  "tick": 79,
   "creatures": [
     {
       "id": "3f7601e5-9096-42a2-857b-b5a141168993",
-      "x": 22,
-      "y": 23,
-      "energy": 37,
+      "x": 21,
+      "y": 22,
+      "energy": 36,
       "speed": 2,
       "sense_range": 5,
       "species": "hunter",
-      "age": 78,
+      "age": 79,
       "traits": {}
     },
     {
       "id": "5314d6f9-28b1-4495-ab7b-b3a28ff9d9a3",
-      "x": 34,
-      "y": 2,
-      "energy": 37,
+      "x": 35,
+      "y": 3,
+      "energy": 36,
       "speed": 2,
       "sense_range": 5,
       "species": "hunter",
-      "age": 78,
+      "age": 79,
       "traits": {}
     },
     {
       "id": "6f9661d1-bdb2-4a95-b4b7-ab274798f7d7",
       "x": 37,
-      "y": 6,
-      "energy": 37,
+      "y": 4,
+      "energy": 36,
       "speed": 2,
       "sense_range": 5,
       "species": "hunter",
-      "age": 78,
+      "age": 79,
       "traits": {}
     },
     {
       "id": "957171b0-4692-40c4-af00-71f243939332",
-      "x": 26,
-      "y": 16,
-      "energy": 25,
+      "x": 25,
+      "y": 14,
+      "energy": 24,
       "speed": 2,
       "sense_range": 5,
       "species": "hunter",
-      "age": 67,
+      "age": 68,
       "traits": {}
     },
     {
       "id": "e9c1876c-e64e-4a71-8cb3-2385433f2187",
-      "x": 16,
-      "y": 19,
-      "energy": 33,
+      "x": 15,
+      "y": 18,
+      "energy": 32,
       "speed": 1,
       "sense_range": 5,
       "species": "grazer",
-      "age": 37,
+      "age": 38,
       "traits": {}
     },
     {
       "id": "50b83116-4ac5-4d3d-bd37-313c47b5d834",
-      "x": 0,
-      "y": 14,
-      "energy": 59,
+      "x": 39,
+      "y": 15,
+      "energy": 58,
       "speed": 2,
       "sense_range": 5,
       "species": "hunter",
-      "age": 33,
+      "age": 34,
       "traits": {}
     },
     {
       "id": "2ab9771c-162d-45cc-b719-9744fe4ce478",
-      "x": 1,
-      "y": 20,
-      "energy": 74,
+      "x": 0,
+      "y": 18,
+      "energy": 73,
       "speed": 2,
       "sense_range": 5,
       "species": "hunter",
-      "age": 33,
+      "age": 34,
       "traits": {}
     },
     {
       "id": "329bf06f-eefb-4767-a596-ecda2ec0c566",
-      "x": 11,
-      "y": 37,
-      "energy": 19,
+      "x": 10,
+      "y": 35,
+      "energy": 18,
       "speed": 2,
       "sense_range": 5,
       "species": "hunter",
-      "age": 8,
+      "age": 9,
       "traits": {}
     }
   ],
@@ -178,6 +178,10 @@
     {
       "x": 26,
       "y": 22
+    },
+    {
+      "x": 5,
+      "y": 33
     }
   ],
   "terrain": [
