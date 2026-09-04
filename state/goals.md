@@ -7,6 +7,13 @@ changelog entry.
 
 ## Current focus
 
+- The world now has a terrain layer (water/sand/grass/forest, generated once at
+  world creation, rendered in `viewer/index.html`) plus a day/night cycle and
+  drifting fog for atmosphere. This is fixed "engine" scaffolding, not content -
+  it's currently purely cosmetic (creatures ignore it completely). Don't
+  regenerate or redesign the terrain itself; DO feel free to make creature
+  behavior actually respond to it (see "terrain-aware behavior" below) - that's
+  content, and content is what evolve is for.
 - The ecosystem now has two species (`rules/ecosystem.py`): grazers (eat resources)
   and hunters (eat grazers, flee-and-chase movement, faster but harder to reproduce).
   Grazers detect hunters using the same `sense_range` gene they use to find food -
@@ -22,12 +29,20 @@ changelog entry.
   change" - don't feel obligated to solve it in one run, but don't ignore it either
   if `state/world.json` shows grazers trending toward zero.
 - Good candidate directions, roughly in order of interesting-to-least:
+  - Terrain-aware behavior: `World.terrain` (a 40-row grid of "w"/"s"/"g"/"f"
+    characters, same coordinates as creatures/resources) exists but nothing
+    reads it yet. Real options: water blocks movement, resources only spawn on
+    grass/forest, hunters or grazers move slower on sand, forest tiles reduce a
+    hunter's effective sense_range (cover for grazers to hide in). Pick one, not
+    all of them.
   - A second resource type with different nutritional value, forcing tradeoffs
     (e.g. a rare high-energy resource hunters could also eat as a fallback, taking
     some pressure off grazers when hunting is going too well).
   - Grazer herd behavior: grazers that cluster tend to spot hunters sooner (more
     eyes) at the cost of competing with each other for the same resources.
-  - Seasons or cycles that change resource spawn rate over time.
+  - Seasons or cycles that change resource spawn rate over time (could also tie
+    to the day/night cycle already in the viewer, e.g. resources spawn faster
+    in daylight).
   - A cost/benefit tradeoff gene beyond speed/sense_range (e.g. size vs. energy
     efficiency).
   - Environmental hazards (regions of the grid that drain energy faster).

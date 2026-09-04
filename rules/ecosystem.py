@@ -45,6 +45,11 @@ HUNTER_MIGRATION_RATE = 0.02
 
 SPECIES = ("grazer", "hunter")
 
+# Terrain is a fixed, cosmetic layer generated once at world creation - it's
+# the "engine" the viewer renders onto, not something evolve runs are meant
+# to regenerate or read. step() never touches it.
+TERRAIN_CODES = "wsgf"  # water, sand, grass, forest
+
 
 @dataclass
 class Creature:
@@ -72,11 +77,13 @@ class World:
     tick: int = 0
     creatures: list[Creature] = field(default_factory=list)
     resources: list[Resource] = field(default_factory=list)
+    terrain: list[str] = field(default_factory=list)  # GRID_SIZE rows, one char/cell
     events: list[str] = field(default_factory=list)  # notable happenings this tick
 
     @classmethod
     def new(cls) -> "World":
         w = cls()
+        w.terrain = _generate_terrain()
         for _ in range(STARTING_GRAZERS):
             w.creatures.append(_spawn_creature("grazer"))
         for _ in range(STARTING_HUNTERS):
@@ -88,6 +95,10 @@ class World:
         w = cls(tick=data.get("tick", 0))
         w.creatures = [Creature(**c) for c in data.get("creatures", [])]
         w.resources = [Resource(**r) for r in data.get("resources", [])]
+        # Saves from before terrain existed have no "terrain" key - generate
+        # one rather than fail, since terrain is cosmetic and has no bearing
+        # on anything the simulation itself depends on.
+        w.terrain = data.get("terrain") or _generate_terrain()
         return w
 
     def to_dict(self) -> dict:
@@ -97,6 +108,7 @@ class World:
             "tick": self.tick,
             "creatures": [asdict(c) for c in self.creatures],
             "resources": [asdict(r) for r in self.resources],
+            "terrain": self.terrain,
             "population": len(self.creatures),
             "grazers": grazers,
             "hunters": hunters,
@@ -199,6 +211,52 @@ class World:
             self.events.append("HUNTERS EXTINCT")
         if len(self.creatures) == 0:
             self.events.append("EXTINCTION")
+
+
+def _generate_terrain() -> list[str]:
+    """Hand-rolled value noise, no numpy: random per-cell values, smoothed by
+    a few passes of neighbor-averaging so terrain forms contiguous patches
+    instead of single-cell salt-and-pepper static, then normalized and cut
+    into four biome bands. Generated once and saved - not regenerated on
+    later loads, so it's a stable landscape rather than a different one
+    every tick.
+    """
+    grid = [[random.random() for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
+
+    for _ in range(4):
+        smoothed = [[0.0] * GRID_SIZE for _ in range(GRID_SIZE)]
+        for y in range(GRID_SIZE):
+            for x in range(GRID_SIZE):
+                total = 0.0
+                count = 0
+                for dy in (-1, 0, 1):
+                    for dx in (-1, 0, 1):
+                        ny, nx = y + dy, x + dx
+                        if 0 <= ny < GRID_SIZE and 0 <= nx < GRID_SIZE:
+                            total += grid[ny][nx]
+                            count += 1
+                smoothed[y][x] = total / count
+        grid = smoothed
+
+    flat = [v for row in grid for v in row]
+    lo, hi = min(flat), max(flat)
+    span = hi - lo or 1.0
+
+    rows = []
+    for y in range(GRID_SIZE):
+        chars = []
+        for x in range(GRID_SIZE):
+            norm = (grid[y][x] - lo) / span
+            if norm < 0.22:
+                chars.append("w")
+            elif norm < 0.30:
+                chars.append("s")
+            elif norm < 0.75:
+                chars.append("g")
+            else:
+                chars.append("f")
+        rows.append("".join(chars))
+    return rows
 
 
 def _spawn_creature(species: str = "grazer") -> Creature:

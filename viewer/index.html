@@ -7,7 +7,7 @@
   :root {
     --bg-top: #0d1512;
     --bg-bottom: #060907;
-    --grid-line: rgba(127, 217, 155, 0.05);
+    --grid-line: rgba(0, 0, 0, 0.06);
     --creature-low: #3f6b52;
     --creature-high: #9fffc4;
     --hunter-low: #6b1f1f;
@@ -88,10 +88,12 @@
 
 <script>
 const GRID = 40;
+const DAY_LENGTH_TICKS = 48;   // one full day/night cycle per real calendar day, at the default 30-min simulate schedule
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 const stats = document.getElementById('stats');
 let cell = canvas.width / GRID;
+let latestWorld = null;
 
 function resize() {
   const displayWidth = canvas.clientWidth;
@@ -110,27 +112,98 @@ function lerpColor(a, b, t) {
   return `rgb(${p[0]},${p[1]},${p[2]})`;
 }
 
-async function render() {
-  let world;
-  try {
-    const res = await fetch('../state/world.json?_=' + Date.now());
-    world = await res.json();
-  } catch (e) {
-    stats.textContent = 'could not load state/world.json - run driver.py simulate first, and serve this folder over http:// (not file://)';
-    return;
+function shade(hex, amount) {
+  const [r, g, b] = hex.match(/\w\w/g).map(h => parseInt(h, 16));
+  const adj = v => Math.max(0, Math.min(255, Math.round(v + amount * 255)));
+  return `rgb(${adj(r)},${adj(g)},${adj(b)})`;
+}
+
+// Deterministic per-cell hash (not Math.random) so terrain shading doesn't
+// flicker to a new random value on every 3-second data refresh - the same
+// tile always jitters the same way.
+function hash01(x, y) {
+  let h = (x * 374761393 + y * 668265263) | 0;
+  h = (h ^ (h >>> 13)) * 1274126177;
+  h = h ^ (h >>> 16);
+  return ((h >>> 0) % 1000) / 1000;
+}
+
+const TERRAIN_COLOR = { w: '#1c3a4a', s: '#8a7454', g: '#1f3324', f: '#12200e' };
+
+function drawTerrain(terrain) {
+  if (!terrain || !terrain.length) return;
+  for (let y = 0; y < terrain.length; y++) {
+    const row = terrain[y];
+    for (let x = 0; x < row.length; x++) {
+      const base = TERRAIN_COLOR[row[x]] || TERRAIN_COLOR.g;
+      const jitter = (hash01(x, y) - 0.5) * 0.16;
+      ctx.fillStyle = shade(base, jitter);
+      ctx.fillRect(x * cell, y * cell, cell + 0.5, cell + 0.5);
+    }
   }
 
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  // faint grid
+  // faint grid, drawn low-opacity over terrain purely to help track motion
+  // in increments of a cell - not meant to read as a spreadsheet.
   ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--grid-line');
   ctx.lineWidth = 1;
   for (let i = 0; i <= GRID; i += 5) {
     ctx.beginPath();
-    ctx.moveTo(i * cell, 0); ctx.lineTo(i * cell, canvas.height);
-    ctx.moveTo(0, i * cell); ctx.lineTo(canvas.width, i * cell);
+    ctx.moveTo(i * cell, 0); ctx.lineTo(i * cell, GRID * cell);
+    ctx.moveTo(0, i * cell); ctx.lineTo(GRID * cell, i * cell);
     ctx.stroke();
   }
+}
+
+// Day/night: a full cycle over DAY_LENGTH_TICKS of simulated time (not real
+// elapsed viewing time) - the world's own clock, not the browser's.
+function drawDayNight(tick) {
+  const phase = ((tick % DAY_LENGTH_TICKS) + DAY_LENGTH_TICKS) % DAY_LENGTH_TICKS / DAY_LENGTH_TICKS;
+  const light = (1 - Math.cos(phase * Math.PI * 2)) / 2; // 0 = midnight, 1 = midday
+  const nightAlpha = (1 - light) * 0.55;
+  ctx.fillStyle = `rgba(6, 10, 22, ${nightAlpha})`;
+  ctx.fillRect(0, 0, GRID * cell, GRID * cell);
+}
+
+// Slow-drifting fog banks, purely decorative, animated on wall-clock time
+// (independent of how often world.json is actually re-fetched) so the
+// world still feels alive between data refreshes.
+const FOG_BANKS = [
+  { ox: 0.15, oy: 0.30, r: 0.32, speed: 0.00006, phase: 0 },
+  { ox: 0.70, oy: 0.60, r: 0.28, speed: 0.00004, phase: 2.1 },
+  { ox: 0.45, oy: 0.80, r: 0.24, speed: 0.00005, phase: 4.2 },
+];
+
+function drawFog(now) {
+  const size = GRID * cell;
+  for (const bank of FOG_BANKS) {
+    const t = now * bank.speed + bank.phase;
+    const cx = (bank.ox + Math.sin(t) * 0.08) * size;
+    const cy = (bank.oy + Math.cos(t * 0.8) * 0.08) * size;
+    const r = bank.r * size;
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    grad.addColorStop(0, 'rgba(200, 215, 225, 0.10)');
+    grad.addColorStop(1, 'rgba(200, 215, 225, 0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
+  }
+}
+
+async function fetchWorld() {
+  try {
+    const res = await fetch('../state/world.json?_=' + Date.now());
+    latestWorld = await res.json();
+  } catch (e) {
+    stats.textContent = 'could not load state/world.json - run driver.py simulate first, and serve this folder over http:// (not file://)';
+  }
+}
+
+function draw(now) {
+  requestAnimationFrame(draw);
+  const world = latestWorld;
+  if (!world) return;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawTerrain(world.terrain);
 
   // resources: small diamonds
   const resourceColor = '#e8c07d';
@@ -188,6 +261,9 @@ async function render() {
     ctx.shadowBlur = 0;
   }
 
+  drawDayNight(world.tick);
+  drawFog(now);
+
   const grazerCount = creatures.filter(c => c.species !== 'hunter').length;
   const hunterCount = creatures.filter(c => c.species === 'hunter').length;
 
@@ -198,8 +274,9 @@ async function render() {
     `<span>resources <b>${(world.resources || []).length}</b></span>`;
 }
 
-render();
-setInterval(render, 3000);
+fetchWorld();
+setInterval(fetchWorld, 3000);
+requestAnimationFrame(draw);
 </script>
 </body>
 </html>

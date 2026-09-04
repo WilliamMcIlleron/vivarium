@@ -67,3 +67,23 @@ def test_population_never_goes_negative():
     for _ in range(500):
         world.step()
         assert len(world.creatures) >= 0
+
+
+def test_new_world_has_full_terrain_grid():
+    world = World.new()
+    assert len(world.terrain) == 40
+    assert all(len(row) == 40 for row in world.terrain)
+    assert all(ch in "wsgf" for row in world.terrain for ch in row)
+
+
+def test_terrain_persists_through_serialization():
+    world = World.new()
+    data = world.to_dict()
+    restored = World.from_dict(data)
+    assert restored.terrain == world.terrain
+
+
+def test_old_save_without_terrain_gets_one_generated():
+    world = World.from_dict({"tick": 5, "creatures": [], "resources": []})
+    assert len(world.terrain) == 40
+    assert all(len(row) == 40 for row in world.terrain)
