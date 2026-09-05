@@ -12,6 +12,10 @@ Two species share the same grid:
     for energy. Hunters do not eat Resources - they depend entirely on grazers,
     which is what makes this a real predator/prey pressure rather than two
     populations that happen to coexist.
+
+Anything that dies of starvation or old age leaves a Carrion behind: a static,
+rotting carcass that hunters can scavenge. Carrion is the only food a hunter
+can get without catching something that is actively fleeing it.
 """
 
 from __future__ import annotations
@@ -26,6 +30,24 @@ STARTING_HUNTERS = 3
 RESOURCE_SPAWN_RATE = 0.6           # probability per tick of a new resource appearing
 RESOURCE_ENERGY = 30
 HUNT_ENERGY = 40                    # energy a hunter gains from eating a grazer
+
+# Carrion: every death that ISN'T a kill (starvation, old age) drops a carcass
+# on that tile. Hunters can scavenge it. Deliberately worth less than a fresh
+# kill and gone after CARRION_DECAY ticks, so it's a lifeline, not a living:
+# a hunter burns ~2 energy/tick, so CARRION_ENERGY covers about 15 ticks of
+# upkeep and can't on its own carry a hunter to its 110-energy reproduction
+# threshold. Reproducing still takes live prey.
+#
+# Why this should stabilise rather than tip the balance: the carcass supply is
+# set by how many creatures die of NON-predation causes, which scales with the
+# grazer population - and predation itself produces no carcasses. So a hunter
+# boom eats its own scavenging supply (kills replace natural deaths), while a
+# hunter crash leaves the carcasses of a large, unhunted grazer population
+# lying around for the next migrant to find. Negative feedback in both
+# directions, which is exactly what the last ~20 straight ticks of
+# "HUNTERS EXTINCT" say this world was missing.
+CARRION_ENERGY = 30
+CARRION_DECAY = 40                  # ticks a carcass lasts before it rots away
 
 # Cost per point of speed, charged every tick regardless of how far a creature
 # actually moved that tick. Speed used to be a free stat: a first-class
@@ -110,12 +132,22 @@ class Resource:
 
 
 @dataclass
+class Carrion:
+    """A carcass left behind by a non-predation death. Static, rots away
+    after CARRION_DECAY ticks, edible by hunters only."""
+    x: int
+    y: int
+    age: int = 0
+
+
+@dataclass
 class World:
     tick: int = 0
     creatures: list[Creature] = field(default_factory=list)
     resources: list[Resource] = field(default_factory=list)
     terrain: list[str] = field(default_factory=list)  # GRID_SIZE rows, one char/cell
     events: list[str] = field(default_factory=list)  # notable happenings this tick
+    carrion: list[Carrion] = field(default_factory=list)
 
     @classmethod
     def new(cls) -> "World":
@@ -132,6 +164,9 @@ class World:
         w = cls(tick=data.get("tick", 0))
         w.creatures = [Creature(**c) for c in data.get("creatures", [])]
         w.resources = [Resource(**r) for r in data.get("resources", [])]
+        # Saves from before carrion existed simply start with none on the
+        # ground - the first natural death repopulates it.
+        w.carrion = [Carrion(**k) for k in data.get("carrion", [])]
         # Saves from before terrain existed have no "terrain" key - generate
         # one rather than fail, since terrain is cosmetic and has no bearing
         # on anything the simulation itself depends on.
@@ -145,6 +180,7 @@ class World:
             "tick": self.tick,
             "creatures": [asdict(c) for c in self.creatures],
             "resources": [asdict(r) for r in self.resources],
+            "carrion": [asdict(k) for k in self.carrion],
             "terrain": self.terrain,
             "population": len(self.creatures),
             "grazers": grazers,
@@ -155,6 +191,12 @@ class World:
         """Advance the world by exactly one tick."""
         self.events = []
         self.tick += 1
+
+        # carcasses rot. Done first so a carcass created at the end of tick N
+        # is scavengable for the whole of tick N+1.
+        for carcass in self.carrion:
+            carcass.age += 1
+        self.carrion = [k for k in self.carrion if k.age < CARRION_DECAY]
 
         if random.random() < RESOURCE_SPAWN_RATE:
             self.resources.append(
@@ -178,20 +220,26 @@ class World:
         grazers = [c for c in self.creatures if c.species == "grazer"]
         hunters = [c for c in self.creatures if c.species == "hunter"]
 
-        # movement: hunters head for the nearest grazer. Grazers flee the
-        # nearest hunter in sense range if one is close; otherwise they head
-        # for the nearest resource. Either falls back to a random walk if
-        # nothing relevant is in sense range. Grazers reusing sense_range for
-        # threat detection means the same mutating gene trades off "finds
-        # food better" against "spots predators better" - no separate dial.
+        # movement: hunters head for whichever is closer, the nearest grazer
+        # or the nearest carcass - live prey is worth more but runs away,
+        # carrion is worth less but holds still. Grazers flee the nearest
+        # hunter in sense range if one is close; otherwise they head for the
+        # nearest resource. Either falls back to a random walk if nothing
+        # relevant is in sense range. Grazers reusing sense_range for threat
+        # detection means the same mutating gene trades off "finds food
+        # better" against "spots predators better" - no separate dial.
         # Grazers separately mutate a `camouflage` gene that shrinks a
         # hunter's *effective* sense_range specifically when hunting them - a
         # second, independent lever against predation that costs nothing on
         # the food-finding side, unlike sense_range which pulls double duty.
+        # Note camouflage does nothing against a carcass: hiding is a
+        # behaviour of the living.
         for creature in self.creatures:
             creature.age += 1
             if creature.species == "hunter":
-                target = _nearest_creature(creature, grazers, camouflage_aware=True)
+                prey = _nearest_creature(creature, grazers, camouflage_aware=True)
+                carcass = _nearest_carrion(creature, self.carrion)
+                target = _closer_target(creature, prey, carcass)
                 if target is not None:
                     _move_toward(creature, target)
                 else:
@@ -215,6 +263,7 @@ class World:
         # Checked after all movement resolves, so this reflects end-of-tick
         # positions for every creature, not just the ones processed first.
         killed_ids: set[str] = set()
+        fed_hunter_ids: set[str] = set()
         for hunter in hunters:
             prey = next(
                 (g for g in grazers
@@ -223,8 +272,21 @@ class World:
             )
             if prey is not None:
                 killed_ids.add(prey.id)
+                fed_hunter_ids.add(hunter.id)
                 hunter.energy += HUNT_ENERGY
                 self.events.append(f"hunt: grazer {prey.id[:8]} eaten at ({hunter.x},{hunter.y})")
+
+        # scavenging: a hunter that made no kill this tick eats a carcass it's
+        # standing on. A hunter never gets both in one tick - a kill is the
+        # better meal and taking both would double-dip a single tile.
+        for hunter in hunters:
+            if hunter.id in fed_hunter_ids:
+                continue
+            carcass = _carrion_at(self.carrion, hunter.x, hunter.y)
+            if carcass is not None:
+                self.carrion.remove(carcass)
+                hunter.energy += CARRION_ENERGY
+                self.events.append(f"scavenge: carcass eaten at ({hunter.x},{hunter.y})")
 
         # grazing: a surviving grazer co-located with a resource eats it.
         for grazer in grazers:
@@ -252,7 +314,10 @@ class World:
             if creature.energy > 0 and creature.age < MAX_AGE:
                 survivors.append(creature)
             else:
+                # Starvation and old age leave a body; being eaten does not,
+                # since the hunter already took the energy.
                 self.events.append(f"death: {creature.id[:8]} at age {creature.age}")
+                self.carrion.append(Carrion(x=creature.x, y=creature.y))
 
         self.creatures = survivors + newborns
 
@@ -336,6 +401,33 @@ def _nearest_resource(creature: Creature, resources: list[Resource]) -> Resource
     return min(in_range, key=lambda r: abs(r.x - creature.x) + abs(r.y - creature.y))
 
 
+def _nearest_carrion(creature: Creature, carrion: list[Carrion]) -> Carrion | None:
+    in_range = [
+        k for k in carrion
+        if abs(k.x - creature.x) <= creature.sense_range
+        and abs(k.y - creature.y) <= creature.sense_range
+    ]
+    if not in_range:
+        return None
+    return min(in_range, key=lambda k: abs(k.x - creature.x) + abs(k.y - creature.y))
+
+
+def _closer_target(
+    creature: Creature, prey: "Creature | None", carcass: "Carrion | None"
+) -> "Creature | Carrion | None":
+    """Which meal a hunter walks toward. Ties go to live prey - it's worth
+    more energy, so when the trip is the same length it's the better bet."""
+    if carcass is None:
+        return prey
+    if prey is None:
+        return carcass
+
+    def distance(target) -> int:
+        return abs(target.x - creature.x) + abs(target.y - creature.y)
+
+    return carcass if distance(carcass) < distance(prey) else prey
+
+
 def _nearest_creature(
     creature: Creature, others: list[Creature], camouflage_aware: bool = False
 ) -> Creature | None:
@@ -362,7 +454,7 @@ def _nearest_creature(
     return min(in_range, key=lambda o: abs(o.x - creature.x) + abs(o.y - creature.y))
 
 
-def _move_toward(creature: Creature, target: "Resource | Creature") -> None:
+def _move_toward(creature: Creature, target: "Resource | Creature | Carrion") -> None:
     dx = _clamp(target.x - creature.x, -creature.speed, creature.speed)
     dy = _clamp(target.y - creature.y, -creature.speed, creature.speed)
     creature.x = _wrap(creature.x + dx)
@@ -390,6 +482,13 @@ def _resource_at(resources: list[Resource], x: int, y: int) -> Resource | None:
     for r in resources:
         if r.x == x and r.y == y:
             return r
+    return None
+
+
+def _carrion_at(carrion: list[Carrion], x: int, y: int) -> Carrion | None:
+    for k in carrion:
+        if k.x == x and k.y == y:
+            return k
     return None
 
 
