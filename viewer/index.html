@@ -120,7 +120,7 @@
   </div>
   <div id="stats">loading...</div>
   <div id="legend">
-    <span class="swatch"><span class="dot" style="background:var(--creature-high)"></span>grazer (brighter = more energy)</span>
+    <span class="swatch"><span class="dot" style="background:var(--creature-high)"></span>grazer (brighter = more energy, fainter = more camouflage)</span>
     <span class="swatch"><span class="tri" style="border-bottom-color:var(--hunter-high)"></span>hunter (brighter = more energy)</span>
     <span class="swatch"><span class="dot" style="background:var(--resource)"></span>resource</span>
   </div>
@@ -347,19 +347,23 @@ function draw(now) {
     ctx.fill();
   }
 
-  // grazers: circle, brightness + size scale with energy, faint glow
+  // grazers: circle, brightness + size scale with energy, faint glow.
+  // Camouflage (new genome trait, see TRAIT_REGISTRY in rules/ecosystem.py)
+  // fades a grazer toward the background the higher it is - a visible echo
+  // of what the trait actually does to a hunter's detection range.
   const creatures = interpolatedCreatures(now);
   for (const c of creatures) {
     if (c.species === 'hunter') continue;
     const e = Math.max(0, Math.min(1, (c.energy ?? 30) / 80));
+    const camo = Math.max(0, Math.min(1, ((c.traits && c.traits.camouflage) || 0) / 3));
     const color = lerpColor('#3f6b52', '#9fffc4', e);
     const r = cell * (0.16 + 0.14 * e);
     const cx = c.drawX * cell + cell / 2;
     const cy = c.drawY * cell + cell / 2;
 
-    ctx.globalAlpha = c.alpha;
+    ctx.globalAlpha = c.alpha * (1 - camo * 0.55);
     ctx.shadowColor = color;
-    ctx.shadowBlur = 4 + 6 * e;
+    ctx.shadowBlur = (4 + 6 * e) * (1 - camo * 0.5);
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.arc(cx, cy, r, 0, Math.PI * 2);

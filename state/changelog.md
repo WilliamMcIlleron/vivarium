@@ -57,3 +57,7 @@ evolve run FAILED: could not parse model response as JSON.
 ## 2026-09-04T21:23:24
 
 evolve run REVERTED (tests failed): attempted - The world was sitting at 1 grazer vs 7 hunters at tick 79 - the known extinction-risk balance issue actually happening, not hypothetical. Implemented the top candidate from goals.md: forest tiles now give grazers cover, halving a hunter's effective sense_range against a grazer standing on a forest cell (`_nearest_creature` in rules/ecosystem.py takes an optional `terrain` arg, passed only for the hunter-seeking-grazer lookup so grazers' own threat detection is unaffected). No viewer change needed since forest tiles are already rendered distinctly - this only changes behavior on an existing visual element, not what's drawn.
+
+## 2026-09-05T03:03:50
+
+Added the first real trait to the empty genome framework: `camouflage` (grazer gene, 0-3, mutation step 0.5) shrinks a hunter's effective sense_range specifically when that hunter is hunting that grazer, via a new `camouflage_aware` flag on `_nearest_creature` - a second, independent lever against predation alongside sense_range, giving grazers and hunters a real arms race to mutate against each other instead of just tuning constants. Updated `viewer/index.html` so grazers visibly fade toward the background in proportion to their camouflage value, per the visual parity rule.

@@ -61,9 +61,16 @@ TERRAIN_CODES = "wsgf"  # water, sand, grass, forest
 # reads them directly everywhere - this registry is for ADDITIONAL traits,
 # so adding a new mutating gene is one line here plus whatever behavior code
 # actually uses it, instead of editing Creature/_spawn_creature/_reproduce
-# separately for each one. Empty on purpose: this is the framework, not the
-# content - what traits exist and what they do is for evolve to decide.
-TRAIT_REGISTRY: dict[str, tuple[float, float, float, float]] = {}
+# separately for each one.
+#
+# camouflage: how much a grazer shrinks a hunter's *effective* sense_range
+# specifically when that hunter is looking for it (see _nearest_creature's
+# camouflage_aware path below). Not species-scoped - the registry has no
+# concept of "grazer-only", so hunters inherit the gene too. It's simply
+# inert for them since nothing on the hunter side ever reads it.
+TRAIT_REGISTRY: dict[str, tuple[float, float, float, float]] = {
+    "camouflage": (0.0, 0.5, 0.0, 3.0),
+}
 
 
 @dataclass
@@ -167,10 +174,14 @@ class World:
         # nothing relevant is in sense range. Grazers reusing sense_range for
         # threat detection means the same mutating gene trades off "finds
         # food better" against "spots predators better" - no separate dial.
+        # Grazers separately mutate a `camouflage` gene that shrinks a
+        # hunter's *effective* sense_range specifically when hunting them - a
+        # second, independent lever against predation that costs nothing on
+        # the food-finding side, unlike sense_range which pulls double duty.
         for creature in self.creatures:
             creature.age += 1
             if creature.species == "hunter":
-                target = _nearest_creature(creature, grazers)
+                target = _nearest_creature(creature, grazers, camouflage_aware=True)
                 if target is not None:
                     _move_toward(creature, target)
                 else:
@@ -312,12 +323,26 @@ def _nearest_resource(creature: Creature, resources: list[Resource]) -> Resource
     return min(in_range, key=lambda r: abs(r.x - creature.x) + abs(r.y - creature.y))
 
 
-def _nearest_creature(creature: Creature, others: list[Creature]) -> Creature | None:
+def _nearest_creature(
+    creature: Creature, others: list[Creature], camouflage_aware: bool = False
+) -> Creature | None:
+    # camouflage_aware is only passed True for a hunter scanning for grazers:
+    # each candidate's own camouflage trait shrinks the searching creature's
+    # effective sense_range just for that candidate, so a well-camouflaged
+    # grazer can be standing well inside a hunter's nominal sense_range and
+    # still go undetected. Grazers scanning for hunter threats are unaffected
+    # (camouflage_aware defaults to False), so the gene only ever helps prey,
+    # never predators.
+    def _effective_range(other: Creature) -> float:
+        if not camouflage_aware:
+            return creature.sense_range
+        return max(0.0, creature.sense_range - other.trait("camouflage"))
+
     in_range = [
         o for o in others
         if o.id != creature.id
-        and abs(o.x - creature.x) <= creature.sense_range
-        and abs(o.y - creature.y) <= creature.sense_range
+        and abs(o.x - creature.x) <= _effective_range(o)
+        and abs(o.y - creature.y) <= _effective_range(o)
     ]
     if not in_range:
         return None

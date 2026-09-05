@@ -18,10 +18,14 @@ probably the one not to make.
   fields since movement code reads them directly everywhere, but any NEW
   mutating trait only needs one entry in `TRAIT_REGISTRY` plus behavior code
   that reads `creature.trait("name")` - inheritance and mutation happen
-  automatically, no need to touch `_reproduce`/`_spawn_creature` by hand.
-  `TRAIT_REGISTRY` is deliberately empty - this is the framework, not the
-  content. The first real trait you add here (tied to real behavior, not
-  just existing for its own sake) is a legitimate "one meaningful change."
+  automatically. First trait added (tick 298): `camouflage`, a grazer-relevant
+  gene (0-3, mutation step 0.5) that shrinks a hunter's effective sense_range
+  specifically when that hunter is hunting that grazer (`_nearest_creature`'s
+  new `camouflage_aware` flag). Because the registry isn't species-scoped,
+  hunters silently inherit the gene too - it's inert for them since nothing on
+  the hunter side reads it. Worth a real per-species registry if a second
+  trait that should be one-sided like this shows up; not worth building for
+  just one.
 - **You now see more than population counts**: the prompt includes a genome
   snapshot (per-species trait averages), recent notable events (extinctions,
   migrations), and recent population history. Use them - if grazers have
