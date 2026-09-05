@@ -61,3 +61,7 @@ evolve run REVERTED (tests failed): attempted - The world was sitting at 1 graze
 ## 2026-09-05T03:03:50
 
 Added the first real trait to the empty genome framework: `camouflage` (grazer gene, 0-3, mutation step 0.5) shrinks a hunter's effective sense_range specifically when that hunter is hunting that grazer, via a new `camouflage_aware` flag on `_nearest_creature` - a second, independent lever against predation alongside sense_range, giving grazers and hunters a real arms race to mutate against each other instead of just tuning constants. Updated `viewer/index.html` so grazers visibly fade toward the background in proportion to their camouflage value, per the visual parity rule.
+
+## 2026-09-05T11:02:59
+
+The genome snapshot showed grazers averaging speed 3.0 against hunters' 2.0 - the reverse of the intended predator/prey asymmetry - because speed had zero energy cost, so it could only ratchet upward, while hunters keep getting reset to the species default every time they go extinct and migrate back in (as just happened again around tick 224). Made MOVE_COST scale with a creature's own speed (`creature.energy -= MOVE_COST * creature.speed`) so being fast now costs energy every tick, giving speed a real tradeoff against food-finding instead of one-way escalation that only ever favored whichever species last avoided a population crash. Purely a constants/mechanics change with nothing new to render, so no viewer update needed.

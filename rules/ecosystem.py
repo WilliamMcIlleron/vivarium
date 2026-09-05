@@ -26,6 +26,16 @@ STARTING_HUNTERS = 3
 RESOURCE_SPAWN_RATE = 0.6           # probability per tick of a new resource appearing
 RESOURCE_ENERGY = 30
 HUNT_ENERGY = 40                    # energy a hunter gains from eating a grazer
+
+# Cost per point of speed, charged every tick regardless of how far a creature
+# actually moved that tick. Speed used to be a free stat: a first-class
+# mutating gene with zero energy price, so it could only ever ratchet upward
+# with no downside. That's exactly what was happening - grazers had drifted to
+# a higher average speed than hunters, who get reset to the species default
+# every time they go extinct and migrate back in, so they could never catch
+# up. Pricing speed in energy gives it a real tradeoff against food-finding
+# for both species instead of a one-way escalation that only ever favored
+# whichever species last avoided a population crash.
 MOVE_COST = 1
 MUTATION_RATE = 0.1                 # chance any given gene mutates on reproduction
 MAX_AGE = 400
@@ -196,7 +206,10 @@ class World:
                         _move_toward(creature, target)
                     else:
                         _move_random(creature)
-            creature.energy -= MOVE_COST
+            # Cost scales with the creature's own speed gene (see MOVE_COST
+            # above) - being fast is a real metabolic expense now, not a
+            # stat with only upside.
+            creature.energy -= MOVE_COST * creature.speed
 
         # hunting: a hunter co-located with a still-living grazer eats it.
         # Checked after all movement resolves, so this reflects end-of-tick

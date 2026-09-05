@@ -1,198 +1,161 @@
 {
-  "tick": 298,
+  "tick": 394,
   "creatures": [
     {
       "id": "e132aac0-520d-49fd-bd14-d8fb02084fac",
-      "x": 8,
-      "y": 25,
-      "energy": 24,
+      "x": 3,
+      "y": 23,
+      "energy": 28,
       "speed": 3,
       "sense_range": 5,
       "species": "grazer",
-      "age": 136,
-      "traits": {}
-    },
-    {
-      "id": "c0bdbce6-1bb8-49f5-b908-2ba9f132d6e3",
-      "x": 1,
-      "y": 16,
-      "energy": 30,
-      "speed": 2,
-      "sense_range": 5,
-      "species": "grazer",
-      "age": 130,
-      "traits": {}
-    },
-    {
-      "id": "5c91d6b7-6f5b-402a-baba-31bfd10e3cc7",
-      "x": 24,
-      "y": 11,
-      "energy": 36,
-      "speed": 3,
-      "sense_range": 5,
-      "species": "grazer",
-      "age": 114,
+      "age": 232,
       "traits": {}
     },
     {
       "id": "cb884b68-d7b4-47d8-a483-b12ed7acc09c",
-      "x": 26,
-      "y": 26,
-      "energy": 43,
+      "x": 20,
+      "y": 22,
+      "energy": 37,
       "speed": 3,
       "sense_range": 5,
       "species": "grazer",
-      "age": 97,
+      "age": 193,
       "traits": {}
     },
     {
       "id": "c34497ba-3991-4c4c-9dbe-d0b41461996e",
-      "x": 1,
-      "y": 6,
-      "energy": 80,
+      "x": 3,
+      "y": 13,
+      "energy": 24,
       "speed": 2,
       "sense_range": 5,
       "species": "hunter",
-      "age": 75,
+      "age": 171,
       "traits": {}
     },
     {
-      "id": "ea26f25f-3797-4d74-a839-527c2d513cd2",
-      "x": 31,
-      "y": 35,
-      "energy": 10,
-      "speed": 2,
-      "sense_range": 5,
-      "species": "grazer",
-      "age": 40,
-      "traits": {}
-    },
-    {
-      "id": "c1c4c2da-1964-4aae-803d-94eed232d172",
-      "x": 12,
-      "y": 6,
-      "energy": 42,
+      "id": "866cb95d-a3d2-4d60-802e-324985f508c0",
+      "x": 22,
+      "y": 27,
+      "energy": 30,
       "speed": 3,
       "sense_range": 5,
       "species": "grazer",
-      "age": 28,
-      "traits": {}
+      "age": 90,
+      "traits": {
+        "camouflage": 0.0
+      }
     },
     {
-      "id": "9603ba01-a4c9-455b-a77a-f0da8e8d2779",
-      "x": 35,
+      "id": "2a2def2b-886e-46d4-b398-1cc2532f0f85",
+      "x": 37,
       "y": 36,
-      "energy": 45,
+      "energy": 24,
       "speed": 3,
-      "sense_range": 5,
+      "sense_range": 6,
       "species": "grazer",
-      "age": 25,
-      "traits": {}
+      "age": 76,
+      "traits": {
+        "camouflage": 0.0
+      }
     },
     {
-      "id": "180b19aa-d149-4452-b737-6e3f4837c1be",
-      "x": 24,
-      "y": 36,
+      "id": "b0ddb641-0063-4f66-b271-a67b7d0398c8",
+      "x": 21,
+      "y": 8,
+      "energy": 52,
+      "speed": 3,
+      "sense_range": 4,
+      "species": "grazer",
+      "age": 68,
+      "traits": {
+        "camouflage": 0.0
+      }
+    },
+    {
+      "id": "b5247cd7-7c76-4dac-b063-eadd9080c3ab",
+      "x": 38,
+      "y": 18,
       "energy": 38,
       "speed": 3,
-      "sense_range": 4,
-      "species": "grazer",
-      "age": 22,
-      "traits": {}
-    },
-    {
-      "id": "9a17bc8e-6312-463a-a6b0-ac9c1ae645fb",
-      "x": 34,
-      "y": 27,
-      "energy": 6,
-      "speed": 3,
       "sense_range": 5,
       "species": "grazer",
-      "age": 14,
-      "traits": {}
+      "age": 32,
+      "traits": {
+        "camouflage": 0.0
+      }
     },
     {
-      "id": "deebe586-7334-450b-8361-a691ff2d146d",
-      "x": 31,
-      "y": 25,
-      "energy": 6,
+      "id": "e9602111-e0c8-447d-94dc-c6f070ca60f9",
+      "x": 22,
+      "y": 23,
+      "energy": 51,
       "speed": 3,
-      "sense_range": 4,
+      "sense_range": 6,
       "species": "grazer",
-      "age": 14,
-      "traits": {}
+      "age": 29,
+      "traits": {
+        "camouflage": 0.0
+      }
     },
     {
-      "id": "032e367b-70c3-45a8-a3c6-0305792c6d7a",
-      "x": 23,
-      "y": 0,
-      "energy": 7,
-      "speed": 3,
-      "sense_range": 4,
-      "species": "grazer",
-      "age": 13,
-      "traits": {}
-    },
-    {
-      "id": "9acf59e2-cd92-495b-b30a-07b943d9f1e5",
-      "x": 31,
+      "id": "ded9fe32-f6a8-4d11-adbd-ee68a6945f56",
+      "x": 20,
       "y": 10,
-      "energy": 8,
+      "energy": 4,
       "speed": 3,
       "sense_range": 5,
       "species": "grazer",
-      "age": 12,
-      "traits": {}
+      "age": 16,
+      "traits": {
+        "camouflage": 0.0
+      }
     },
     {
-      "id": "282e27f6-a6b6-4f02-ad53-a656bfc7cee2",
-      "x": 21,
-      "y": 3,
-      "energy": 9,
+      "id": "9a39fd4b-badd-4395-8fd4-b93907dc6af8",
+      "x": 5,
+      "y": 27,
+      "energy": 17,
       "speed": 3,
       "sense_range": 5,
       "species": "grazer",
-      "age": 11,
-      "traits": {}
+      "age": 3,
+      "traits": {
+        "camouflage": 0.0
+      }
     },
     {
-      "id": "c24486ac-dfd7-4360-9681-ffdcfe8e5217",
-      "x": 31,
-      "y": 25,
-      "energy": 10,
-      "speed": 2,
-      "sense_range": 5,
-      "species": "grazer",
-      "age": 10,
-      "traits": {}
-    },
-    {
-      "id": "ade25aba-1278-42aa-90b4-52c85e8a669c",
-      "x": 24,
-      "y": 16,
-      "energy": 11,
-      "speed": 3,
-      "sense_range": 5,
-      "species": "grazer",
-      "age": 9,
-      "traits": {}
-    },
-    {
-      "id": "31944a16-138b-46fc-9d8c-a06ded37be24",
-      "x": 11,
-      "y": 31,
+      "id": "b58d6ecc-7395-4fc0-80a0-9ccc25d67bc1",
+      "x": 18,
+      "y": 4,
       "energy": 18,
       "speed": 3,
-      "sense_range": 5,
+      "sense_range": 3,
       "species": "grazer",
       "age": 2,
-      "traits": {}
+      "traits": {
+        "camouflage": 0.0
+      }
+    },
+    {
+      "id": "a383217b-5f6e-450d-8066-c9f1e25d66fa",
+      "x": 37,
+      "y": 36,
+      "energy": 20,
+      "speed": 3,
+      "sense_range": 6,
+      "species": "grazer",
+      "age": 0,
+      "traits": {
+        "camouflage": 0.0
+      }
     }
   ],
   "resources": [
     {
-      "x": 0,
-      "y": 30
+      "x": 22,
+      "y": 21
     }
   ],
   "terrain": [
@@ -237,7 +200,7 @@
     "ggggggggssssswwsgggggggggggggffffggggggg",
     "ggggggggsssgswwsgggggggggggggffffggggggg"
   ],
-  "population": 17,
-  "grazers": 16,
+  "population": 12,
+  "grazers": 11,
   "hunters": 1
 }
