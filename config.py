@@ -14,12 +14,33 @@ knows or cares which one is active.
 """
 
 import os
+import re
 import subprocess
 
 
 class Backend:
     def complete(self, prompt: str, max_tokens: int = 4000) -> str:
         raise NotImplementedError
+
+
+class RateLimitedError(RuntimeError):
+    """Raised instead of a plain RuntimeError when a backend failure looks
+    like a rate/usage limit rather than some other failure. driver.py catches
+    this specifically to auto-retry every 5 min (see RATE_LIMIT_MARKER_PATH)
+    without also auto-retrying a genuinely broken proposal or a bad API key.
+    """
+
+
+# The `claude` CLI has no machine-readable exit code distinguishing "rate
+# limited" from any other failure, so this is a heuristic match on the
+# human-readable message text. If Anthropic changes that wording this stops
+# matching and a limit just falls back to a plain RuntimeError (no
+# auto-retry, same as before this existed) rather than failing loudly - check
+# logs/evolve.log for the raw message if retries seem to have stopped
+# happening after a limit.
+_RATE_LIMIT_PATTERNS = re.compile(
+    r"usage limit|rate limit|limit reached|try again later|\b429\b", re.IGNORECASE
+)
 
 
 class ClaudeCodeCLIBackend(Backend):
@@ -45,7 +66,10 @@ class ClaudeCodeCLIBackend(Backend):
             timeout=600,
         )
         if result.returncode != 0:
-            raise RuntimeError(f"claude CLI failed: {result.stderr.strip()}")
+            message = result.stderr.strip() or result.stdout.strip()
+            if _RATE_LIMIT_PATTERNS.search(message):
+                raise RateLimitedError(f"claude CLI rate-limited: {message}")
+            raise RuntimeError(f"claude CLI failed: {message}")
         return result.stdout.strip()
 
 
@@ -64,11 +88,16 @@ class ClaudeAPIBackend(Backend):
         self.client = anthropic.Anthropic(api_key=api_key)
 
     def complete(self, prompt: str, max_tokens: int = 4000) -> str:
-        message = self.client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=max_tokens,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        import anthropic
+
+        try:
+            message = self.client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=max_tokens,
+                messages=[{"role": "user", "content": prompt}],
+            )
+        except anthropic.RateLimitError as e:
+            raise RateLimitedError(str(e)) from e
         return "".join(block.text for block in message.content if block.type == "text")
 
 

@@ -73,6 +73,7 @@ config.py               backend abstraction (CLI subscription vs API key)
 rules/ecosystem.py      the simulation itself (pure Python, no LLM)
 state/world.json        current world state (species, resources, tick count)
 state/goals.md          what the world is currently trying to become (Claude edits this)
+state/scratchpad.md     evolve's private notes to itself across runs, for changes too big for one diff
 state/changelog.md      append-only log of every evolve run and what it changed
 state/budget.json       spend/run tracking, used by the guardrails
 PROTECTED.md            paths evolve is not allowed to touch
@@ -86,7 +87,9 @@ SCHEDULING_WINDOWS.md   unattended scheduling on plain Windows (Task Scheduler)
 ## Guardrails (enforced in code, not just prompted)
 
 1. An allowlist: evolve may only write under `rules/`, `viewer/`, and `state/goals.md` -
-   everything else is rejected even before the `PROTECTED.md` check runs.
+   everything else is rejected even before the `PROTECTED.md` check runs. `state/scratchpad.md`
+   (evolve's private cross-run notes) is also writable, via the same out-of-band mechanism as
+   `goals.md` rather than the diff-checked `files` list - it doesn't count toward diff caps.
 2. `PROTECTED.md` paths are diffed against every evolve change; touching one fails the run.
 3. `state/budget.json` caps runs per day / diff size per run; evolve refuses to start over
    cap. Diff size is measured as actual added/removed lines against the file on disk, not

@@ -21,7 +21,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from config import get_backend
+from config import RateLimitedError, get_backend
 from rules.ecosystem import World
 
 ROOT = Path(__file__).parent
@@ -36,6 +36,16 @@ PAUSED_PATH = ROOT / "PAUSED"
 NOTIFY_SCRIPT = ROOT / "notify_windows.ps1"
 NOTABLE_EVENTS_PATH = STATE / "notable_events.log"
 LORE_PATH = STATE / "lore.md"
+SCRATCHPAD_PATH = STATE / "scratchpad.md"
+
+# Set by cmd_evolve() when a Claude call fails specifically from a rate limit
+# (RateLimitedError, see config.py) - Vivarium-Evolve-Retry polls for this
+# every 5 min so a transient limit costs minutes instead of up to ~8 hours
+# waiting for the next real scheduled slot. cmd_evolve() clears it right
+# before every real attempt and only re-sets it on a fresh RateLimitedError,
+# so a non-rate-limit failure (bad JSON, rejected diff, reverted change)
+# never turns this into a general "keep retrying everything" loop.
+RATE_LIMIT_MARKER_PATH = STATE / "evolve_rate_limited.flag"
 
 # Backs the public viewer at https://vivarium.williamjonahmci.workers.dev/
 # (Cloudflare Worker + KV, see cloudflare/README.md). This ID is the real,
@@ -152,6 +162,11 @@ Recent changelog (most recent entries last):
 Current goals:
 {goals}
 
+Your own scratchpad (private notes to your future self across runs - not \
+goals.md, not shown to William, no pruning rule applies here, free to \
+rewrite however you like or leave untouched):
+{scratchpad}
+
 Current contents of rules/ecosystem.py:
 {ecosystem_source}
 
@@ -177,6 +192,12 @@ requirements.txt is off-limits, so don't propose anything that needs a pip \
 package.
 - Pick ONE meaningful change. Do not attempt several goals from the goals \
 file at once.
+- state/scratchpad.md is yours alone - use it when a change is genuinely too \
+large for one diff, to leave your future self a note on what step you're on \
+and what's next (e.g. "step 1 of 3: added a decision-weight field to \
+Creature, not wired into any behavior yet"). Reading and rewriting it \
+doesn't count against your file/line limits above, same as goals_update. \
+Most runs can leave it untouched - respond with null.
 - rules/ecosystem.py has an extensible genome: Creature.traits is a dict, \
 and TRAIT_REGISTRY (name -> (default, mutation_step, min, max)) makes \
 whatever's in it mutate and inherit automatically. Adding a new gene is one \
@@ -187,6 +208,7 @@ Respond with exactly this JSON shape:
 {{
   "files": {{"relative/path.py": "full new file content", ...}},
   "goals_update": "full new content of state/goals.md, or null if unchanged",
+  "scratchpad_update": "full new content of state/scratchpad.md, or null if unchanged",
   "changelog_entry": "1-3 sentences: what you changed and why"
 }}
 """
@@ -207,6 +229,7 @@ Respond with exactly this JSON shape:
 {{
   "files": {{"relative/path.py": "full new file content", ...}},
   "goals_update": "full new content of state/goals.md, or null if unchanged",
+  "scratchpad_update": "full new content of state/scratchpad.md, or null if unchanged",
   "changelog_entry": "1-3 sentences: what you changed and why"
 }}
 """
@@ -258,10 +281,35 @@ def cmd_evolve() -> None:
     world = _load_world()
     _record_population_history(budget, world)
 
-    if _should_reflect(budget):
-        _run_reflection(world, budget, log)
-    else:
-        _run_code_change(world, budget, log)
+    # Cleared optimistically right before the real attempt - only a fresh
+    # RateLimitedError below re-sets it, so any other outcome (success,
+    # rejected, reverted, unparseable response) stops the automatic retry
+    # sweep instead of looping on something that isn't actually a rate limit.
+    RATE_LIMIT_MARKER_PATH.unlink(missing_ok=True)
+    try:
+        if _should_reflect(budget):
+            _run_reflection(world, budget, log)
+        else:
+            _run_code_change(world, budget, log)
+    except RateLimitedError as e:
+        RATE_LIMIT_MARKER_PATH.write_text(f"{datetime.datetime.now().isoformat()} {e}\n")
+        log.warning(
+            f"evolve run RATE LIMITED - Vivarium-Evolve-Retry will retry "
+            f"every 5 min until it succeeds: {e}"
+        )
+
+
+def cmd_evolve_retry() -> None:
+    """Cheap no-op unless the previous evolve attempt was rate-limited (see
+    RATE_LIMIT_MARKER_PATH) - Task Scheduler runs this every 5 min so a
+    transient Claude rate limit costs minutes instead of up to ~8 hours
+    waiting for the next real scheduled evolve slot. Never adds extra
+    attempts beyond what the rate limit itself already caused: cmd_evolve()
+    clears the marker on any non-rate-limit outcome, which stops this loop.
+    """
+    if not RATE_LIMIT_MARKER_PATH.exists():
+        return
+    cmd_evolve()
 
 
 def _should_reflect(budget: dict) -> bool:
@@ -323,6 +371,7 @@ def _run_code_change(world: World, budget: dict, log: logging.Logger) -> None:
     prompt = EVOLVE_PROMPT_TEMPLATE.format(
         **_shared_context(world, budget),
         goals=GOALS_PATH.read_text(),
+        scratchpad=SCRATCHPAD_PATH.read_text() if SCRATCHPAD_PATH.exists() else "(empty)",
         ecosystem_source=(ROOT / "rules" / "ecosystem.py").read_text(),
         viewer_source=(ROOT / "viewer" / "index.html").read_text(),
         max_files=budget["max_diff_files_per_run"],
@@ -382,6 +431,8 @@ def _run_code_change(world: World, budget: dict, log: logging.Logger) -> None:
 
     if proposal.get("goals_update"):
         GOALS_PATH.write_text(proposal["goals_update"])
+    if proposal.get("scratchpad_update"):
+        SCRATCHPAD_PATH.write_text(proposal["scratchpad_update"])
 
     changelog_entry = proposal["changelog_entry"]
     if retried:
@@ -665,15 +716,17 @@ def _tail(path: Path, lines: int) -> str:
 # --------------------------------------------------------------------- cli --
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2 or sys.argv[1] not in ("simulate", "evolve"):
-        print("usage: python driver.py [simulate|evolve]")
+    if len(sys.argv) != 2 or sys.argv[1] not in ("simulate", "evolve", "evolve-retry"):
+        print("usage: python driver.py [simulate|evolve|evolve-retry]")
         sys.exit(1)
 
     try:
         if sys.argv[1] == "simulate":
             cmd_simulate()
-        else:
+        elif sys.argv[1] == "evolve":
             cmd_evolve()
+        else:
+            cmd_evolve_retry()
     except SystemExit:
         raise  # sys.exit() calls elsewhere already log their own reason
     except Exception:
