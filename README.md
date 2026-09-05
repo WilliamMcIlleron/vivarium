@@ -22,14 +22,16 @@ Current model: two species share the grid - **grazers** (eat resources) and **hu
 (eat grazers). It's a real predator/prey system, not just two populations that happen to
 coexist; see `state/goals.md` for the world's current focus.
 
-## Current state (2026-09-04)
+## Current state (2026-09-05)
 
-Evolve hasn't landed a real committed change on its own yet. Every real attempt so far
-has been one of: rejected by a guardrail bug that made success mathematically
-impossible (fixed, see below), failed to parse as JSON, or reverted after its tests
-failed. The predator/prey split, terrain, genome framework, and reflection runs in the
-code today were hand-built to bootstrap the world past its first, very slow evolve runs.
-The guardrails below exist so the next real change is evolve's, not a human's.
+Evolve landed its first real self-committed change at 2026-09-05T03:03: a `camouflage`
+gene for grazers that shrinks a hunting hunter's effective sense range, succeeding on
+the first attempt under the raised caps below. Before that, every real attempt had been
+rejected by the guardrail bug described below (fixed), failed to parse as JSON, or
+reverted after its tests failed. The predator/prey split, terrain, genome framework, and
+reflection runs in the code were hand-built to bootstrap the world past those early,
+failing runs; camouflage is the first trait evolve itself added to the empty
+`TRAIT_REGISTRY`.
 
 ## Quick start
 
