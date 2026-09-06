@@ -13,6 +13,12 @@ Two species share the same grid:
     which is what makes this a real predator/prey pressure rather than two
     populations that happen to coexist.
 
+Two genes fight over the same number. A grazer's `camouflage` shrinks a
+hunter's effective sense_range specifically when that hunter is looking for
+it; a hunter's `acuity` adds back to it, at a per-tick energy cost. Seeing
+through camouflage is therefore something a predator has to be able to afford,
+and hiding from a sharp-eyed one takes more than the average grazer has.
+
 Anything that dies of starvation or old age leaves a Carrion behind: a static,
 rotting carcass that hunters can scavenge. Carrion is the only food a hunter
 can get without catching something that is actively fleeing it.
@@ -83,6 +89,18 @@ LINEAGE_MEMORY = 8
 # for both species instead of a one-way escalation that only ever favored
 # whichever species last avoided a population crash.
 MOVE_COST = 1
+
+# Energy a hunter pays every tick per FULL point of its acuity gene (see
+# TRAIT_REGISTRY below). Charged with int() truncation, so half-points are
+# free: acuity 0.5 is a free edge, 1.0 costs 1/tick, 2.0 costs 2/tick. That's
+# deliberate - it gives a cheap first rung onto the ladder (a hunter that has
+# just migrated in and is one bad tick from starving can still afford to look
+# harder) while making a genuinely keen-eyed predator an expensive animal that
+# has to convert its sight into kills. Same lesson as MOVE_COST: a gene with
+# no price can only ratchet upward, and this world already has one of those in
+# camouflage.
+ACUITY_COST = 1
+
 MUTATION_RATE = 0.1                 # chance any given gene mutates on reproduction
 MAX_AGE = 400
 
@@ -121,11 +139,22 @@ TERRAIN_CODES = "wsgf"  # water, sand, grass, forest
 #
 # camouflage: how much a grazer shrinks a hunter's *effective* sense_range
 # specifically when that hunter is looking for it (see _nearest_creature's
-# camouflage_aware path below). Not species-scoped - the registry has no
-# concept of "grazer-only", so hunters inherit the gene too. It's simply
-# inert for them since nothing on the hunter side ever reads it.
+# camouflage_aware path below).
+#
+# acuity: the hunter's half of that same subtraction. It ADDS to a hunter's
+# effective sense_range, but only when the hunter is looking for live prey -
+# never for carrion, never for anything else - so it is precisely a counter to
+# camouflage rather than a general-purpose senses upgrade. Unlike camouflage
+# it is not free: see ACUITY_COST. Camouflage had nothing evolving against it
+# for hundreds of ticks (grazers at 0.54 and climbing, hunters flatly at 0.0),
+# which is a one-way escalation, not an arms race.
+#
+# Neither gene is species-scoped - the registry has no concept of
+# "grazer-only", so each species carries the other's gene inertly, since
+# nothing on that side ever reads it.
 TRAIT_REGISTRY: dict[str, tuple[float, float, float, float]] = {
     "camouflage": (0.0, 0.5, 0.0, 3.0),
+    "acuity": (0.0, 0.5, 0.0, 3.0),
 }
 
 
@@ -291,12 +320,12 @@ class World:
         # relevant is in sense range. Grazers reusing sense_range for threat
         # detection means the same mutating gene trades off "finds food
         # better" against "spots predators better" - no separate dial.
-        # Grazers separately mutate a `camouflage` gene that shrinks a
-        # hunter's *effective* sense_range specifically when hunting them - a
-        # second, independent lever against predation that costs nothing on
-        # the food-finding side, unlike sense_range which pulls double duty.
-        # Note camouflage does nothing against a carcass: hiding is a
-        # behaviour of the living.
+        # Layered on top of that, prey and predator each have one gene that
+        # only touches the hunter's prey-detection check: the grazer's
+        # `camouflage` subtracts from the hunter's effective sense_range and
+        # the hunter's `acuity` adds to it. Note neither does anything for a
+        # carcass: hiding is a behaviour of the living, and a body in the open
+        # takes no special eye to find.
         for creature in self.creatures:
             creature.age += 1
             if creature.species == "hunter":
@@ -321,6 +350,12 @@ class World:
             # above) - being fast is a real metabolic expense now, not a
             # stat with only upside.
             creature.energy -= MOVE_COST * creature.speed
+            # And a hunter pays for its eyes every tick whether or not they
+            # found anything (see ACUITY_COST). Charged only to hunters, since
+            # a grazer's inherited acuity is inert - it should not be billed
+            # for a sense it never uses.
+            if creature.species == "hunter":
+                creature.energy -= int(ACUITY_COST * creature.trait("acuity"))
 
         # hunting: a hunter co-located with a still-living grazer eats it.
         # Checked after all movement resolves, so this reflects end-of-tick
@@ -520,17 +555,25 @@ def _closer_target(
 def _nearest_creature(
     creature: Creature, others: list[Creature], camouflage_aware: bool = False
 ) -> Creature | None:
-    # camouflage_aware is only passed True for a hunter scanning for grazers:
-    # each candidate's own camouflage trait shrinks the searching creature's
-    # effective sense_range just for that candidate, so a well-camouflaged
-    # grazer can be standing well inside a hunter's nominal sense_range and
-    # still go undetected. Grazers scanning for hunter threats are unaffected
-    # (camouflage_aware defaults to False), so the gene only ever helps prey,
-    # never predators.
+    # camouflage_aware is only passed True for a hunter scanning for grazers.
+    # It's the predator/prey detection path, and two genes pull on the same
+    # number there: each candidate's own camouflage shrinks the searching
+    # creature's effective sense_range just for that candidate, and the
+    # searcher's own acuity adds back to it. So a well-camouflaged grazer can
+    # be standing well inside a hunter's nominal sense_range and still go
+    # undetected - unless that hunter is paying (in energy every tick, see
+    # ACUITY_COST) to see through it. Grazers scanning for hunter threats are
+    # unaffected (camouflage_aware defaults to False), so neither gene ever
+    # helps the side it wasn't meant for.
     def _effective_range(other: Creature) -> float:
         if not camouflage_aware:
             return creature.sense_range
-        return max(0.0, creature.sense_range - other.trait("camouflage"))
+        return max(
+            0.0,
+            creature.sense_range
+            - other.trait("camouflage")
+            + creature.trait("acuity"),
+        )
 
     in_range = [
         o for o in others

@@ -140,6 +140,7 @@
   <div id="legend">
     <span class="swatch"><span class="dot" style="background:var(--creature-high)"></span>grazer (brighter = more energy, fainter = more camouflage)</span>
     <span class="swatch"><span class="tri" style="border-bottom-color:var(--hunter-high)"></span>hunter (brighter = more energy)</span>
+    <span class="swatch"><span class="ring" style="border-color:var(--hunter-high)"></span>acuity (rings around a hunter - sees through camouflage, costs energy every tick)</span>
     <span class="swatch"><span class="dot" style="background:var(--resource)"></span>resource</span>
     <span class="swatch"><span class="ring" style="border-color:var(--carrion)"></span>carcass (fades as it rots)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--migrant);border-style:dashed"></span>migrant (just arrived, carries remembered genes)</span>
@@ -153,6 +154,7 @@ const GRID = 40;
 const DAY_LENGTH_TICKS = 48;   // one full cycle per ~4 real hours at the 5-min simulate schedule - a deliberate choice for more visual variety per viewing session, not tied to a real calendar day
 const CARRION_DECAY = 40;      // must match CARRION_DECAY in rules/ecosystem.py - only used to fade a carcass out over its lifetime
 const MIGRANT_MARK_TICKS = 40; // how long a migrant keeps its arrival halo - viewer-only, nothing in the sim reads it
+const MAX_TRAIT = 3;           // upper bound of camouflage and acuity in TRAIT_REGISTRY - used only to normalise them for drawing
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 const stats = document.getElementById('stats');
@@ -354,10 +356,12 @@ async function fetchLatestLore() {
 // extinction is a mutated draw from this, so the readout is a preview of
 // what the next arrival of that species will roughly look like - and, when a
 // species is currently extinct, the only trace of it left in the world.
-function bloodline(records) {
+// Each species is shown with its OWN side of the detection arms race:
+// camouflage for grazers, acuity for hunters.
+function bloodline(records, gene, label) {
   if (!records || !records.length) return 'nothing remembered';
   const avg = key => records.reduce((sum, g) => sum + (g[key] || 0), 0) / records.length;
-  return `speed ${avg('speed').toFixed(1)} · sense ${avg('sense_range').toFixed(1)} · camo ${avg('camouflage').toFixed(1)}`;
+  return `speed ${avg('speed').toFixed(1)} · sense ${avg('sense_range').toFixed(1)} · ${label} ${avg(gene).toFixed(1)}`;
 }
 
 function draw(now) {
@@ -430,14 +434,42 @@ function draw(now) {
     ctx.globalAlpha = 1;
   }
 
+  // acuity: the hunter's half of the detection arms race (see TRAIT_REGISTRY
+  // in rules/ecosystem.py). It widens a hunter's effective sense_range when
+  // it's looking for live prey - cancelling grazer camouflage point for
+  // point - and it burns energy every tick, so it should look like something
+  // switched on rather than a body part. Drawn as concentric orange sensing
+  // rings beneath the triangle: more rings, reaching further, the keener the
+  // hunter. A hunter at acuity 0 has none and reads exactly as before, so
+  // the rings are a direct readout of how much this predator is paying to
+  // see. Solid and hunter-coloured, so they don't read as the bone-grey
+  // carcass ring or the violet dashed migrant halo.
+  for (const c of creatures) {
+    if (c.species !== 'hunter') continue;
+    const acuity = Math.max(0, Math.min(1, ((c.traits && c.traits.acuity) || 0) / MAX_TRAIT));
+    if (acuity <= 0) continue;
+    const cx = c.drawX * cell + cell / 2;
+    const cy = c.drawY * cell + cell / 2;
+    const rings = 1 + Math.round(acuity * 2);   // 1..3
+    ctx.strokeStyle = '#ff8f6b';
+    ctx.lineWidth = Math.max(0.6, cell * 0.035);
+    for (let i = 1; i <= rings; i++) {
+      ctx.globalAlpha = c.alpha * 0.42 * (0.35 + 0.65 * acuity) * (1 - (i - 1) / (rings + 1));
+      ctx.beginPath();
+      ctx.arc(cx, cy, cell * (0.30 + 0.22 * i), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
   // grazers: circle, brightness + size scale with energy, faint glow.
-  // Camouflage (new genome trait, see TRAIT_REGISTRY in rules/ecosystem.py)
+  // Camouflage (genome trait, see TRAIT_REGISTRY in rules/ecosystem.py)
   // fades a grazer toward the background the higher it is - a visible echo
   // of what the trait actually does to a hunter's detection range.
   for (const c of creatures) {
     if (c.species === 'hunter') continue;
     const e = Math.max(0, Math.min(1, (c.energy ?? 30) / 80));
-    const camo = Math.max(0, Math.min(1, ((c.traits && c.traits.camouflage) || 0) / 3));
+    const camo = Math.max(0, Math.min(1, ((c.traits && c.traits.camouflage) || 0) / MAX_TRAIT));
     const color = lerpColor('#3f6b52', '#9fffc4', e);
     const r = cell * (0.16 + 0.14 * e);
     const cx = c.drawX * cell + cell / 2;
@@ -495,8 +527,8 @@ function draw(now) {
   const lineage = world.lineage || {};
   memoryEl.innerHTML =
     `<span>remembered bloodline (what the next migrant inherits)</span>` +
-    `<span>grazer <b>${bloodline(lineage.grazer)}</b></span>` +
-    `<span>hunter <b>${bloodline(lineage.hunter)}</b></span>`;
+    `<span>grazer <b>${bloodline(lineage.grazer, 'camouflage', 'camo')}</b></span>` +
+    `<span>hunter <b>${bloodline(lineage.hunter, 'acuity', 'acuity')}</b></span>`;
 }
 
 fetchWorld();
