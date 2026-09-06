@@ -16,6 +16,12 @@ Two species share the same grid:
 Anything that dies of starvation or old age leaves a Carrion behind: a static,
 rotting carcass that hunters can scavenge. Carrion is the only food a hunter
 can get without catching something that is actively fleeing it.
+
+The world also keeps a genetic memory (`World.lineage`): the genomes of the
+creatures that actually managed to reproduce here. When a species dies out and
+a migrant wanders back in, that migrant arrives as a mutated descendant of the
+remembered stock instead of a blank species default - so an extinction is a
+bottleneck, not a factory reset.
 """
 
 from __future__ import annotations
@@ -48,6 +54,24 @@ HUNT_ENERGY = 40                    # energy a hunter gains from eating a grazer
 # "HUNTERS EXTINCT" say this world was missing.
 CARRION_ENERGY = 30
 CARRION_DECAY = 40                  # ticks a carcass lasts before it rots away
+
+# How many genomes the world remembers per species (see World.lineage and
+# _spawn_creature's `lineage` argument). Only creatures that actually
+# reproduced get recorded: the memory is of what WORKED here, not of
+# everything that happened to die here.
+#
+# Hunters are why this exists. The event log shows them going extinct and
+# re-migrating over and over, and every single migrant was arriving at the
+# flat species default - speed 2, sense_range 5, camouflage 0 - while grazers,
+# who never fully crashed, kept ratcheting camouflage upward across hundreds
+# of ticks (0.58 average and climbing at tick 958). That isn't an arms race,
+# it's a one-way escalation: the predator side was structurally incapable of
+# ever keeping an adaptation, because its genome was reset by every crash.
+# With a lineage memory, a migrant descends from the last stock that bred
+# here, so both species can accumulate across crashes and camouflage finally
+# has something evolving against it. It's a bottleneck (memory is small, and
+# the migrant is a single mutated draw from it), not a save file.
+LINEAGE_MEMORY = 8
 
 # Cost per point of speed, charged every tick regardless of how far a creature
 # actually moved that tick. Speed used to be a free stat: a first-class
@@ -116,6 +140,12 @@ class Creature:
     species: str = "grazer"
     age: int = 0
     traits: dict = field(default_factory=dict)  # extra genome, see TRAIT_REGISTRY
+    # "born" for anything that hatched here (including the founding
+    # population), "migrant" for something that walked in from outside after
+    # its species had died out. Purely descriptive - no behavior reads it -
+    # but the viewer marks recent migrants, since "where this bloodline came
+    # from" is now a real fact about a creature rather than a formality.
+    origin: str = "born"
 
     def trait(self, name: str) -> float:
         default = TRAIT_REGISTRY[name][0] if name in TRAIT_REGISTRY else 0.0
@@ -148,6 +178,10 @@ class World:
     terrain: list[str] = field(default_factory=list)  # GRID_SIZE rows, one char/cell
     events: list[str] = field(default_factory=list)  # notable happenings this tick
     carrion: list[Carrion] = field(default_factory=list)
+    # species -> list of remembered genomes (oldest first, capped at
+    # LINEAGE_MEMORY). Written only when a creature reproduces; read only when
+    # a migrant arrives.
+    lineage: dict = field(default_factory=lambda: {s: [] for s in SPECIES})
 
     @classmethod
     def new(cls) -> "World":
@@ -167,6 +201,10 @@ class World:
         # Saves from before carrion existed simply start with none on the
         # ground - the first natural death repopulates it.
         w.carrion = [Carrion(**k) for k in data.get("carrion", [])]
+        # Same for lineage: a save from before the world remembered anything
+        # starts blank, and the first birth of each species fills it in.
+        remembered = data.get("lineage") or {}
+        w.lineage = {s: list(remembered.get(s, [])) for s in SPECIES}
         # Saves from before terrain existed have no "terrain" key - generate
         # one rather than fail, since terrain is cosmetic and has no bearing
         # on anything the simulation itself depends on.
@@ -181,11 +219,23 @@ class World:
             "creatures": [asdict(c) for c in self.creatures],
             "resources": [asdict(r) for r in self.resources],
             "carrion": [asdict(k) for k in self.carrion],
+            "lineage": {s: list(self.lineage.get(s, [])) for s in SPECIES},
             "terrain": self.terrain,
             "population": len(self.creatures),
             "grazers": grazers,
             "hunters": hunters,
         }
+
+    def remember(self, creature: Creature) -> None:
+        """Record a genome that successfully reproduced here. Rolling window:
+        only the last LINEAGE_MEMORY are kept, so the memory tracks what the
+        population looks like NOW rather than averaging its whole history.
+        A species that hasn't bred in a long time keeps whatever it last
+        managed - which is the point, since that's exactly the species that
+        keeps going extinct."""
+        record = self.lineage.setdefault(creature.species, [])
+        record.append(creature.genes())
+        del record[:-LINEAGE_MEMORY]
 
     def step(self) -> None:
         """Advance the world by exactly one tick."""
@@ -203,18 +253,31 @@ class World:
                 Resource(x=random.randrange(GRID_SIZE), y=random.randrange(GRID_SIZE))
             )
 
+        # Migrants are drawn from the world's genetic memory (see
+        # LINEAGE_MEMORY): a descendant of the last stock that bred here,
+        # mutated once on arrival, rather than a fresh default-statted
+        # creature. Falls back to the species default when nothing of that
+        # species ever reproduced here.
         if (
             not any(c.species == "hunter" for c in self.creatures)
             and random.random() < HUNTER_MIGRATION_RATE
         ):
-            self.creatures.append(_spawn_creature("hunter"))
+            self.creatures.append(
+                _spawn_creature(
+                    "hunter", lineage=self.lineage.get("hunter"), origin="migrant"
+                )
+            )
             self.events.append("a hunter migrates into the world")
 
         if (
             not any(c.species == "grazer" for c in self.creatures)
             and random.random() < GRAZER_MIGRATION_RATE
         ):
-            self.creatures.append(_spawn_creature("grazer"))
+            self.creatures.append(
+                _spawn_creature(
+                    "grazer", lineage=self.lineage.get("grazer"), origin="migrant"
+                )
+            )
             self.events.append("a grazer migrates into the world")
 
         grazers = [c for c in self.creatures if c.species == "grazer"]
@@ -309,6 +372,10 @@ class World:
             if creature.energy >= repro["threshold"]:
                 creature.energy -= repro["cost"]
                 newborns.append(_reproduce(creature))
+                # Breeding is the only thing that writes to the world's
+                # genetic memory - reaching the threshold is the world's own
+                # definition of a genome that works here.
+                self.remember(creature)
                 self.events.append(f"birth ({creature.species}) at ({creature.x},{creature.y})")
 
             if creature.energy > 0 and creature.age < MAX_AGE:
@@ -375,18 +442,40 @@ def _generate_terrain() -> list[str]:
     return rows
 
 
-def _spawn_creature(species: str = "grazer") -> Creature:
+def _spawn_creature(
+    species: str = "grazer",
+    lineage: list[dict] | None = None,
+    origin: str = "born",
+) -> Creature:
+    """A fresh creature. With no `lineage`, it gets the flat species default -
+    that's the founding population. With one, it's a descendant of the
+    remembered stock: one genome picked at random from the world's memory,
+    then mutated exactly as if it had been born to that ancestor.
+    """
     speed = 2 if species == "hunter" else 1
+    sense_range = 5
     traits = {name: default for name, (default, _step, _lo, _hi) in TRAIT_REGISTRY.items()}
+
+    if lineage:
+        ancestor = random.choice(lineage)
+        speed = int(ancestor.get("speed", speed))
+        sense_range = int(ancestor.get("sense_range", sense_range))
+        traits = {
+            name: ancestor.get(name, default)
+            for name, (default, _step, _lo, _hi) in TRAIT_REGISTRY.items()
+        }
+        speed, sense_range, traits = _mutated_genes(speed, sense_range, traits)
+
     return Creature(
         id=str(uuid.uuid4()),
         x=random.randrange(GRID_SIZE),
         y=random.randrange(GRID_SIZE),
         energy=50,
         speed=speed,
-        sense_range=5,
+        sense_range=sense_range,
         species=species,
         traits=traits,
+        origin=origin,
     )
 
 
@@ -492,9 +581,14 @@ def _carrion_at(carrion: list[Carrion], x: int, y: int) -> Carrion | None:
     return None
 
 
-def _reproduce(parent: Creature) -> Creature:
-    speed = parent.speed
-    sense_range = parent.sense_range
+def _mutated_genes(
+    speed: int, sense_range: int, traits: dict
+) -> tuple[int, int, dict]:
+    """One round of mutation over a whole genome. Shared by ordinary birth
+    and by migrant arrival so a migrant drawn from lineage memory is exactly
+    'a child of the remembered stock', with no second, divergent copy of the
+    mutation rules to keep in sync.
+    """
     if random.random() < MUTATION_RATE:
         speed = max(1, speed + random.choice([-1, 1]))
     if random.random() < MUTATION_RATE:
@@ -503,12 +597,20 @@ def _reproduce(parent: Creature) -> Creature:
     # Generic mutation for whatever's in TRAIT_REGISTRY - adding a new gene
     # there is enough to make it inherit and mutate correctly, no extra code
     # needed here.
-    new_traits = dict(parent.traits)
+    new_traits = dict(traits)
     for name, (default, step, lo, hi) in TRAIT_REGISTRY.items():
         value = new_traits.get(name, default)
         if random.random() < MUTATION_RATE:
             value = _clamp(value + random.choice([-step, step]), lo, hi)
         new_traits[name] = value
+
+    return speed, sense_range, new_traits
+
+
+def _reproduce(parent: Creature) -> Creature:
+    speed, sense_range, new_traits = _mutated_genes(
+        parent.speed, parent.sense_range, parent.traits
+    )
 
     cost = REPRODUCE[parent.species]["cost"]
     return Creature(

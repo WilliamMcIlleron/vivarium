@@ -14,6 +14,7 @@
     --hunter-high: #ff8f6b;
     --resource: #e8c07d;
     --carrion: #b9b2a4;
+    --migrant: #c9b6ff;
     --text: #cfe8d6;
     --muted: #5c7266;
   }
@@ -78,6 +79,17 @@
     border-right: 4px solid transparent;
     border-bottom: 8px solid;
   }
+  #memory {
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--muted);
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    flex-wrap: wrap;
+    max-width: min(900px, 96vw);
+  }
+  #memory b { color: var(--text); font-weight: 600; }
   #latest-evolve {
     margin-top: 22px;
     width: 100%;
@@ -130,7 +142,9 @@
     <span class="swatch"><span class="tri" style="border-bottom-color:var(--hunter-high)"></span>hunter (brighter = more energy)</span>
     <span class="swatch"><span class="dot" style="background:var(--resource)"></span>resource</span>
     <span class="swatch"><span class="ring" style="border-color:var(--carrion)"></span>carcass (fades as it rots)</span>
+    <span class="swatch"><span class="ring" style="border-color:var(--migrant);border-style:dashed"></span>migrant (just arrived, carries remembered genes)</span>
   </div>
+  <div id="memory"></div>
   <div id="latest-evolve"></div>
   <div id="latest-lore"></div>
 
@@ -138,9 +152,11 @@
 const GRID = 40;
 const DAY_LENGTH_TICKS = 48;   // one full cycle per ~4 real hours at the 5-min simulate schedule - a deliberate choice for more visual variety per viewing session, not tied to a real calendar day
 const CARRION_DECAY = 40;      // must match CARRION_DECAY in rules/ecosystem.py - only used to fade a carcass out over its lifetime
+const MIGRANT_MARK_TICKS = 40; // how long a migrant keeps its arrival halo - viewer-only, nothing in the sim reads it
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 const stats = document.getElementById('stats');
+const memoryEl = document.getElementById('memory');
 let cell = canvas.width / GRID;
 let latestWorld = null;
 
@@ -333,6 +349,17 @@ async function fetchLatestLore() {
   }
 }
 
+// The world's genetic memory (World.lineage in rules/ecosystem.py): the
+// genomes of creatures that actually bred here. A migrant arriving after an
+// extinction is a mutated draw from this, so the readout is a preview of
+// what the next arrival of that species will roughly look like - and, when a
+// species is currently extinct, the only trace of it left in the world.
+function bloodline(records) {
+  if (!records || !records.length) return 'nothing remembered';
+  const avg = key => records.reduce((sum, g) => sum + (g[key] || 0), 0) / records.length;
+  return `speed ${avg('speed').toFixed(1)} · sense ${avg('sense_range').toFixed(1)} · camo ${avg('camouflage').toFixed(1)}`;
+}
+
 function draw(now) {
   requestAnimationFrame(draw);
   const world = latestWorld;
@@ -377,11 +404,36 @@ function draw(now) {
     ctx.globalAlpha = 1;
   }
 
+  const creatures = interpolatedCreatures(now);
+
+  // migrants: a creature that walked in from outside after its species had
+  // died out here. It is NOT a blank default any more - it descends from the
+  // world's remembered stock (see bloodline() and World.lineage), so an
+  // arrival is a real genetic event worth seeing. Marked with a dashed
+  // violet halo that fades out over its first MIGRANT_MARK_TICKS ticks,
+  // drawn beneath the body so the species shape still reads on top.
+  for (const c of creatures) {
+    if (c.origin !== 'migrant') continue;
+    const age = c.age || 0;
+    if (age >= MIGRANT_MARK_TICKS) continue;
+    const fade = 1 - age / MIGRANT_MARK_TICKS;
+    const cx = c.drawX * cell + cell / 2;
+    const cy = c.drawY * cell + cell / 2;
+    ctx.globalAlpha = c.alpha * 0.75 * fade;
+    ctx.strokeStyle = '#c9b6ff';
+    ctx.lineWidth = Math.max(1, cell * 0.06);
+    ctx.setLineDash([cell * 0.15, cell * 0.13]);
+    ctx.beginPath();
+    ctx.arc(cx, cy, cell * (0.38 + 0.12 * fade), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+  }
+
   // grazers: circle, brightness + size scale with energy, faint glow.
   // Camouflage (new genome trait, see TRAIT_REGISTRY in rules/ecosystem.py)
   // fades a grazer toward the background the higher it is - a visible echo
   // of what the trait actually does to a hunter's detection range.
-  const creatures = interpolatedCreatures(now);
   for (const c of creatures) {
     if (c.species === 'hunter') continue;
     const e = Math.max(0, Math.min(1, (c.energy ?? 30) / 80));
@@ -439,6 +491,12 @@ function draw(now) {
     `<span>hunters <b>${world.hunters ?? hunterCount}</b></span>` +
     `<span>resources <b>${(world.resources || []).length}</b></span>` +
     `<span>carcasses <b>${(world.carrion || []).length}</b></span>`;
+
+  const lineage = world.lineage || {};
+  memoryEl.innerHTML =
+    `<span>remembered bloodline (what the next migrant inherits)</span>` +
+    `<span>grazer <b>${bloodline(lineage.grazer)}</b></span>` +
+    `<span>hunter <b>${bloodline(lineage.hunter)}</b></span>`;
 }
 
 fetchWorld();
