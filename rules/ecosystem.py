@@ -13,11 +13,12 @@ Two species share the same grid:
     which is what makes this a real predator/prey pressure rather than two
     populations that happen to coexist.
 
-Two genes fight over the same number. A grazer's `camouflage` shrinks a
-hunter's effective sense_range specifically when that hunter is looking for
-it; a hunter's `acuity` adds back to it, at a per-tick energy cost. Seeing
-through camouflage is therefore something a predator has to be able to afford,
-and hiding from a sharp-eyed one takes more than the average grazer has.
+Three genes fight over the same number - the hunter's effective sense_range
+when it is looking for live prey. A grazer's `camouflage` shrinks it (hiding as
+an individual); a grazer's herd cover shrinks it further (hiding as a crowd -
+see HERD_RADIUS); a hunter's `acuity` adds back to it, at a per-tick energy
+cost. Concealment is something prey can buy two different ways, and seeing
+through either is something a predator has to be able to afford.
 
 Anything that dies of starvation or old age leaves a Carrion behind: a static,
 rotting carcass that hunters can scavenge. Carrion is the only food a hunter
@@ -60,6 +61,27 @@ HUNT_ENERGY = 40                    # energy a hunter gains from eating a grazer
 # "HUNTERS EXTINCT" say this world was missing.
 CARRION_ENERGY = 30
 CARRION_DECAY = 40                  # ticks a carcass lasts before it rots away
+
+# Safety in numbers. Every other grazer within HERD_RADIUS tiles (Chebyshev,
+# the same box shape sense_range uses) gives a grazer HERD_COVER_PER_NEIGHBOR
+# of extra concealment against a hunter's prey-detection check, capped at
+# HERD_COVER_MAX - the predator-confusion effect: a single animal in the open
+# is easy to fix on, a mass of them is not.
+#
+# This is aimed squarely at the crash this world keeps having. Between tick
+# 1147 and tick 1229 it went from 13 grazers and 1 hunter to 2 grazers and 4
+# hunters: a hunter boom converting a whole prey population into predators
+# faster than it could breed, which ends in GRAZERS EXTINCT and then the
+# hunters starving behind them. The important property is that it is
+# DENSITY-DEPENDENT and prey-side: cover exists only while grazers are
+# numerous, which is exactly the phase where hunters are over-feeding, and it
+# evaporates as the population thins - so a lone straggler is as catchable as
+# it ever was and this does nothing to deepen the chronic hunter extinctions.
+# It brakes the boom without being a flat nerf, and hunters already have the
+# counter: `acuity` adds range back on the same subtraction.
+HERD_RADIUS = 2
+HERD_COVER_PER_NEIGHBOR = 0.5
+HERD_COVER_MAX = 2.0
 
 # How many genomes the world remembers per species (see World.lineage and
 # _spawn_creature's `lineage` argument). Only creatures that actually
@@ -145,16 +167,22 @@ TERRAIN_CODES = "wsgf"  # water, sand, grass, forest
 # effective sense_range, but only when the hunter is looking for live prey -
 # never for carrion, never for anything else - so it is precisely a counter to
 # camouflage rather than a general-purpose senses upgrade. Unlike camouflage
-# it is not free: see ACUITY_COST. Camouflage had nothing evolving against it
-# for hundreds of ticks (grazers at 0.54 and climbing, hunters flatly at 0.0),
-# which is a one-way escalation, not an arms race.
+# it is not free: see ACUITY_COST.
 #
-# Neither gene is species-scoped - the registry has no concept of
-# "grazer-only", so each species carries the other's gene inertly, since
-# nothing on that side ever reads it.
+# gregariousness: how strongly a grazer with nothing chasing it will walk
+# toward the nearest grazer it can see instead of toward food. That's what
+# makes herd cover (HERD_RADIUS) an evolvable strategy rather than an accident
+# of where creatures happen to stand - and it pays for itself in missed meals
+# rather than in a flat energy charge, since a grazer standing in the herd is
+# a grazer not standing on a resource.
+#
+# None of the three is species-scoped - the registry has no concept of
+# "grazer-only", so each species carries the other's genes inertly, since
+# nothing on that side ever reads them.
 TRAIT_REGISTRY: dict[str, tuple[float, float, float, float]] = {
     "camouflage": (0.0, 0.5, 0.0, 3.0),
     "acuity": (0.0, 0.5, 0.0, 3.0),
+    "gregariousness": (0.0, 0.5, 0.0, 3.0),
 }
 
 
@@ -175,6 +203,10 @@ class Creature:
     # but the viewer marks recent migrants, since "where this bloodline came
     # from" is now a real fact about a creature rather than a formality.
     origin: str = "born"
+    # NOT a gene: recomputed from scratch every tick for grazers from how many
+    # other grazers are standing nearby (see _update_herd_cover). Persisted
+    # only so the viewer can draw the herd without recomputing it.
+    herd_cover: float = 0.0
 
     def trait(self, name: str) -> float:
         default = TRAIT_REGISTRY[name][0] if name in TRAIT_REGISTRY else 0.0
@@ -312,20 +344,26 @@ class World:
         grazers = [c for c in self.creatures if c.species == "grazer"]
         hunters = [c for c in self.creatures if c.species == "hunter"]
 
+        # Who is standing with whom, from start-of-tick positions, before
+        # anything moves - so a hunter's detection check this tick reads the
+        # herd as it was when the tick began rather than half-updated.
+        _update_herd_cover(grazers)
+
         # movement: hunters head for whichever is closer, the nearest grazer
         # or the nearest carcass - live prey is worth more but runs away,
         # carrion is worth less but holds still. Grazers flee the nearest
-        # hunter in sense range if one is close; otherwise they head for the
-        # nearest resource. Either falls back to a random walk if nothing
-        # relevant is in sense range. Grazers reusing sense_range for threat
-        # detection means the same mutating gene trades off "finds food
-        # better" against "spots predators better" - no separate dial.
-        # Layered on top of that, prey and predator each have one gene that
-        # only touches the hunter's prey-detection check: the grazer's
-        # `camouflage` subtracts from the hunter's effective sense_range and
-        # the hunter's `acuity` adds to it. Note neither does anything for a
-        # carcass: hiding is a behaviour of the living, and a body in the open
-        # takes no special eye to find.
+        # hunter in sense range if one is close; otherwise they either drift
+        # toward company (gregariousness) or head for the nearest resource,
+        # falling back to a random walk if nothing relevant is in sense range.
+        # Grazers reusing sense_range for threat detection means the same
+        # mutating gene trades off "finds food better" against "spots
+        # predators better" - no separate dial.
+        # Layered on top of that, three things pull on the hunter's
+        # prey-detection number and nothing else: a grazer's `camouflage` and
+        # its herd cover subtract from the hunter's effective sense_range, and
+        # the hunter's `acuity` adds back to it. None of them does anything
+        # for a carcass: hiding is a behaviour of the living, and a body in
+        # the open takes no special eye to find.
         for creature in self.creatures:
             creature.age += 1
             if creature.species == "hunter":
@@ -342,7 +380,10 @@ class World:
                     _move_away(creature, threat)
                 else:
                     target = _nearest_resource(creature, self.resources)
-                    if target is not None:
+                    companion = _herd_target(creature, grazers, target)
+                    if companion is not None:
+                        _move_toward(creature, companion)
+                    elif target is not None:
                         _move_toward(creature, target)
                     else:
                         _move_random(creature)
@@ -514,6 +555,44 @@ def _spawn_creature(
     )
 
 
+def _update_herd_cover(grazers: list[Creature]) -> None:
+    """Recompute every grazer's herd cover from how many other grazers are
+    within HERD_RADIUS tiles. Not a gene and not inherited - it's a fact
+    about where an animal is standing this tick, so it's rebuilt from
+    scratch each time and never carried over.
+    """
+    for grazer in grazers:
+        neighbors = sum(
+            1 for other in grazers
+            if other.id != grazer.id
+            and abs(other.x - grazer.x) <= HERD_RADIUS
+            and abs(other.y - grazer.y) <= HERD_RADIUS
+        )
+        grazer.herd_cover = min(HERD_COVER_MAX, HERD_COVER_PER_NEIGHBOR * neighbors)
+
+
+def _herd_target(
+    creature: Creature, grazers: list[Creature], food: "Resource | None"
+) -> "Creature | None":
+    """The grazer this one wants to go stand next to, or None if it would
+    rather eat. Only consulted when nothing is chasing it - a threat always
+    wins. With no food in sense range, joining the herd beats wandering at
+    random, so it always goes; with food in range it's a coin weighted by
+    the gregariousness gene, so the gene's real price is the meals it skips
+    rather than an energy charge bolted on the side.
+    """
+    gregariousness = creature.trait("gregariousness")
+    if gregariousness <= 0:
+        return None
+    companion = _nearest_creature(creature, grazers)
+    if companion is None:
+        return None
+    if food is None:
+        return companion
+    _default, _step, _lo, hi = TRAIT_REGISTRY["gregariousness"]
+    return companion if random.random() < gregariousness / hi else None
+
+
 def _nearest_resource(creature: Creature, resources: list[Resource]) -> Resource | None:
     in_range = [
         r for r in resources
@@ -556,15 +635,16 @@ def _nearest_creature(
     creature: Creature, others: list[Creature], camouflage_aware: bool = False
 ) -> Creature | None:
     # camouflage_aware is only passed True for a hunter scanning for grazers.
-    # It's the predator/prey detection path, and two genes pull on the same
-    # number there: each candidate's own camouflage shrinks the searching
-    # creature's effective sense_range just for that candidate, and the
-    # searcher's own acuity adds back to it. So a well-camouflaged grazer can
-    # be standing well inside a hunter's nominal sense_range and still go
-    # undetected - unless that hunter is paying (in energy every tick, see
-    # ACUITY_COST) to see through it. Grazers scanning for hunter threats are
-    # unaffected (camouflage_aware defaults to False), so neither gene ever
-    # helps the side it wasn't meant for.
+    # It's the predator/prey detection path, and three things pull on the same
+    # number there: each candidate's own camouflage AND its herd cover shrink
+    # the searching creature's effective sense_range just for that candidate,
+    # and the searcher's own acuity adds back to it. So a well-hidden grazer -
+    # by pigment, by company, or both - can be standing well inside a hunter's
+    # nominal sense_range and still go undetected, unless that hunter is
+    # paying (in energy every tick, see ACUITY_COST) to see through it.
+    # Grazers scanning for hunter threats, and grazers looking for each other,
+    # are unaffected (camouflage_aware defaults to False), so none of this
+    # ever helps the side it wasn't meant for.
     def _effective_range(other: Creature) -> float:
         if not camouflage_aware:
             return creature.sense_range
@@ -572,6 +652,7 @@ def _nearest_creature(
             0.0,
             creature.sense_range
             - other.trait("camouflage")
+            - other.herd_cover
             + creature.trait("acuity"),
         )
 

@@ -73,6 +73,7 @@
     width: 8px; height: 8px; border-radius: 50%; display: inline-block;
     border: 1.5px solid; background: transparent;
   }
+  .bar { width: 14px; height: 2px; display: inline-block; border-radius: 1px; }
   .tri {
     width: 0; height: 0; display: inline-block;
     border-left: 4px solid transparent;
@@ -139,8 +140,10 @@
   <div id="stats">loading...</div>
   <div id="legend">
     <span class="swatch"><span class="dot" style="background:var(--creature-high)"></span>grazer (brighter = more energy, fainter = more camouflage)</span>
+    <span class="swatch"><span class="bar" style="background:var(--creature-high)"></span>herd bond (linked grazers are harder for a hunter to single out - brighter = deeper cover)</span>
+    <span class="swatch"><span class="ring" style="border-color:var(--creature-high);border-style:dotted"></span>gregariousness (how strongly a grazer walks to company instead of food)</span>
     <span class="swatch"><span class="tri" style="border-bottom-color:var(--hunter-high)"></span>hunter (brighter = more energy)</span>
-    <span class="swatch"><span class="ring" style="border-color:var(--hunter-high)"></span>acuity (rings around a hunter - sees through camouflage, costs energy every tick)</span>
+    <span class="swatch"><span class="ring" style="border-color:var(--hunter-high)"></span>acuity (rings around a hunter - sees through camouflage and herds, costs energy every tick)</span>
     <span class="swatch"><span class="dot" style="background:var(--resource)"></span>resource</span>
     <span class="swatch"><span class="ring" style="border-color:var(--carrion)"></span>carcass (fades as it rots)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--migrant);border-style:dashed"></span>migrant (just arrived, carries remembered genes)</span>
@@ -154,7 +157,9 @@ const GRID = 40;
 const DAY_LENGTH_TICKS = 48;   // one full cycle per ~4 real hours at the 5-min simulate schedule - a deliberate choice for more visual variety per viewing session, not tied to a real calendar day
 const CARRION_DECAY = 40;      // must match CARRION_DECAY in rules/ecosystem.py - only used to fade a carcass out over its lifetime
 const MIGRANT_MARK_TICKS = 40; // how long a migrant keeps its arrival halo - viewer-only, nothing in the sim reads it
-const MAX_TRAIT = 3;           // upper bound of camouflage and acuity in TRAIT_REGISTRY - used only to normalise them for drawing
+const MAX_TRAIT = 3;           // upper bound of the genome traits in TRAIT_REGISTRY - used only to normalise them for drawing
+const HERD_RADIUS = 2;         // must match HERD_RADIUS in rules/ecosystem.py - who counts as standing together
+const HERD_COVER_MAX = 2;      // must match HERD_COVER_MAX - only used to normalise the bond brightness
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 const stats = document.getElementById('stats');
@@ -356,12 +361,14 @@ async function fetchLatestLore() {
 // extinction is a mutated draw from this, so the readout is a preview of
 // what the next arrival of that species will roughly look like - and, when a
 // species is currently extinct, the only trace of it left in the world.
-// Each species is shown with its OWN side of the detection arms race:
-// camouflage for grazers, acuity for hunters.
-function bloodline(records, gene, label) {
+// Each species is shown with the genes it actually uses: concealment
+// (camouflage) and sociability (gregariousness) for grazers, acuity for
+// hunters.
+function bloodline(records, genes) {
   if (!records || !records.length) return 'nothing remembered';
   const avg = key => records.reduce((sum, g) => sum + (g[key] || 0), 0) / records.length;
-  return `speed ${avg('speed').toFixed(1)} · sense ${avg('sense_range').toFixed(1)} · ${label} ${avg(gene).toFixed(1)}`;
+  const extra = genes.map(([key, label]) => `${label} ${avg(key).toFixed(1)}`).join(' · ');
+  return `speed ${avg('speed').toFixed(1)} · sense ${avg('sense_range').toFixed(1)} · ${extra}`;
 }
 
 function draw(now) {
@@ -410,6 +417,56 @@ function draw(now) {
 
   const creatures = interpolatedCreatures(now);
 
+  // herd bonds: every pair of grazers within HERD_RADIUS tiles is joined by a
+  // soft green thread. That closeness is not decoration - each neighbour
+  // subtracts from a hunter's effective sense_range when it looks for that
+  // grazer (see HERD_COVER_PER_NEIGHBOR in rules/ecosystem.py), so a tight
+  // knot of threads is literally a patch of the map a predator has trouble
+  // reading. Brightness tracks the cover the pair actually has, so a bare
+  // pair is a faint line and a crowd glows into a web.
+  const herd = creatures.filter(c => c.species !== 'hunter');
+  ctx.strokeStyle = '#9fffc4';
+  ctx.lineWidth = Math.max(0.8, cell * 0.05);
+  for (let i = 0; i < herd.length; i++) {
+    for (let j = i + 1; j < herd.length; j++) {
+      const a = herd[i], b = herd[j];
+      if (Math.abs(a.x - b.x) > HERD_RADIUS || Math.abs(a.y - b.y) > HERD_RADIUS) continue;
+      const dx = a.drawX - b.drawX, dy = a.drawY - b.drawY;
+      if (Math.abs(dx) > GRID / 2 || Math.abs(dy) > GRID / 2) continue; // wrapped edge
+      const cover = Math.max(0, Math.min(1,
+        Math.min(a.herd_cover || 0, b.herd_cover || 0) / HERD_COVER_MAX));
+      ctx.globalAlpha = Math.min(a.alpha, b.alpha) * (0.16 + 0.44 * cover);
+      ctx.beginPath();
+      ctx.moveTo(a.drawX * cell + cell / 2, a.drawY * cell + cell / 2);
+      ctx.lineTo(b.drawX * cell + cell / 2, b.drawY * cell + cell / 2);
+      ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = 1;
+
+  // gregariousness: the grazer's own appetite for company (a gene, unlike the
+  // bonds above, which are just where it happens to be standing). Drawn as a
+  // fine dotted green circle that widens with the gene - a sociable animal
+  // reaches further to go stand with someone, at the cost of the meals it
+  // walks past to do it. Dotted and green so it doesn't read as the hunter's
+  // solid orange acuity rings or the migrant's dashed violet halo.
+  for (const c of creatures) {
+    if (c.species === 'hunter') continue;
+    const greg = Math.max(0, Math.min(1, ((c.traits && c.traits.gregariousness) || 0) / MAX_TRAIT));
+    if (greg <= 0) continue;
+    const cx = c.drawX * cell + cell / 2;
+    const cy = c.drawY * cell + cell / 2;
+    ctx.globalAlpha = c.alpha * (0.20 + 0.35 * greg);
+    ctx.strokeStyle = '#9fffc4';
+    ctx.lineWidth = Math.max(0.6, cell * 0.03);
+    ctx.setLineDash([cell * 0.04, cell * 0.10]);
+    ctx.beginPath();
+    ctx.arc(cx, cy, cell * (0.30 + 0.34 * greg), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+  }
+
   // migrants: a creature that walked in from outside after its species had
   // died out here. It is NOT a blank default any more - it descends from the
   // world's remembered stock (see bloodline() and World.lineage), so an
@@ -436,14 +493,14 @@ function draw(now) {
 
   // acuity: the hunter's half of the detection arms race (see TRAIT_REGISTRY
   // in rules/ecosystem.py). It widens a hunter's effective sense_range when
-  // it's looking for live prey - cancelling grazer camouflage point for
-  // point - and it burns energy every tick, so it should look like something
-  // switched on rather than a body part. Drawn as concentric orange sensing
-  // rings beneath the triangle: more rings, reaching further, the keener the
-  // hunter. A hunter at acuity 0 has none and reads exactly as before, so
-  // the rings are a direct readout of how much this predator is paying to
-  // see. Solid and hunter-coloured, so they don't read as the bone-grey
-  // carcass ring or the violet dashed migrant halo.
+  // it's looking for live prey - cancelling grazer camouflage and herd cover
+  // point for point - and it burns energy every tick, so it should look like
+  // something switched on rather than a body part. Drawn as concentric
+  // orange sensing rings beneath the triangle: more rings, reaching further,
+  // the keener the hunter. A hunter at acuity 0 has none and reads exactly as
+  // before, so the rings are a direct readout of how much this predator is
+  // paying to see. Solid and hunter-coloured, so they don't read as the
+  // bone-grey carcass ring or the violet dashed migrant halo.
   for (const c of creatures) {
     if (c.species !== 'hunter') continue;
     const acuity = Math.max(0, Math.min(1, ((c.traits && c.traits.acuity) || 0) / MAX_TRAIT));
@@ -516,19 +573,21 @@ function draw(now) {
 
   const grazerCount = creatures.filter(c => c.species !== 'hunter').length;
   const hunterCount = creatures.filter(c => c.species === 'hunter').length;
+  const herdedCount = creatures.filter(c => c.species !== 'hunter' && (c.herd_cover || 0) > 0).length;
 
   stats.innerHTML =
     `tick <b>${world.tick}</b>` +
     `<span>grazers <b>${world.grazers ?? grazerCount}</b></span>` +
     `<span>hunters <b>${world.hunters ?? hunterCount}</b></span>` +
+    `<span>in a herd <b>${herdedCount}</b></span>` +
     `<span>resources <b>${(world.resources || []).length}</b></span>` +
     `<span>carcasses <b>${(world.carrion || []).length}</b></span>`;
 
   const lineage = world.lineage || {};
   memoryEl.innerHTML =
     `<span>remembered bloodline (what the next migrant inherits)</span>` +
-    `<span>grazer <b>${bloodline(lineage.grazer, 'camouflage', 'camo')}</b></span>` +
-    `<span>hunter <b>${bloodline(lineage.hunter, 'acuity', 'acuity')}</b></span>`;
+    `<span>grazer <b>${bloodline(lineage.grazer, [['camouflage', 'camo'], ['gregariousness', 'herd']])}</b></span>` +
+    `<span>hunter <b>${bloodline(lineage.hunter, [['acuity', 'acuity']])}</b></span>`;
 }
 
 fetchWorld();
