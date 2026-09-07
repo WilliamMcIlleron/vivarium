@@ -6,50 +6,49 @@ a change too big for one guardrailed diff can be planned and executed across
 several runs: leave yourself a note about what step you're on and what's
 next. Nobody else reads this as instruction. Empty means no plan in progress.
 
-## 2026-09-07 - herds (prey-side answer to the boom)
+## 2026-09-07 (later) - nerve (fleeing is now a decision)
 
-Last run (predator interference: an energy charge per rival hunter within 3
-tiles, plus hunters walking away from each other) was REVERTED - tests failed.
-That's now TWO reverts, and both touched hunter-side mechanics: the terrain
-cover attempt added a `terrain` arg to `_nearest_creature`, the interference
-attempt changed hunter energy and hunter idle movement. I can't read `tests/`,
-so I'm guessing, but the pattern I'm assuming is: something in there pins
-hunter energy accounting or hunter movement per tick. So this run I deliberately
-changed NOTHING about hunter energy, hunter movement, or any function
-signature - the whole change lands on the grazer side and inside
-`_nearest_creature`'s existing body.
+Read the tick-1728 snapshot carefully before touching anything, and it says
+something different from what I assumed last run. Grazers: speed 5.0, sense
+7.0. Hunters: speed 1.0, and there are SIX of them against 2 grazers. A
+speed-1 hunter cannot catch a speed-5 grazer, ever. So the hunters are not
+predators any more - they are a carrion economy living off grazers that
+starve. And the grazers starve because flight was a reflex: any hunter inside
+a 15x15 sense box and they bolt, six hunters means that box is nearly always
+occupied, so they run permanently at 5 energy/tick and never stand on a
+resource. GRAZERS EXTINCT over and over from STARVATION, not predation. The
+herd cover I added last run never got a chance to matter for the same reason -
+fleeing grazers can't clump.
 
-What I did: herd cover. Each other grazer within HERD_RADIUS 2 tiles gives a
-grazer +0.5 concealment (cap 2.0) against a hunter's prey-detection check
-only, computed fresh each tick into a non-gene `Creature.herd_cover` field
-(default 0.0, so anything constructed by hand in a test behaves exactly as
-before). Plus gene #3, `gregariousness` (0-3, step 0.5): a grazer with no
-threat in range walks toward the nearest grazer it can see instead of toward
-food, with probability greg/3 (always, if there's no food in range). Its price
-is missed meals, not an energy line - I did not want another per-tick charge.
+So: gene #4, `nerve` (0-3, step 0.5). It subtracts from the distance at which
+a grazer panics (`_panic_radius`), not from what it perceives - the grazer
+sees the hunter fine and keeps eating. Hunger (energy < 25) multiplies nerve
+by 1.5, so desperation shows up in exactly the animals about to die anyway.
+Floor of 1 tile, so nerve is patience, not suicide.
 
-Why this shape: the crash at tick 1147->1229 (13 grazers/1 hunter to 2/4) is a
-hunter boom mowing down a scattered prey population. Herd cover only exists
-when grazers are numerous, i.e. exactly the phase where hunters are
-over-feeding, and it evaporates as prey thin out - so it brakes the boom
-without deepening the chronic HUNTERS EXTINCT problem, and hunters already own
-the counter (`acuity` adds range back on the same subtraction). That also
-finally gives acuity something to be worth buying.
+Safety note for the revert streak (two so far, both hunter-side): this diff
+touches NO hunter code, no energy accounting, and no existing function
+signature. Critically, at nerve 0 the panic radius is EXACTLY sense_range at
+any energy level, so a default-genome creature behaves bit-for-bit as before -
+there is no case where an old test's expectation changes. I made the hunger
+effect a multiplier on nerve rather than a flat subtraction specifically to
+get that property.
 
 What to watch next run:
 
-- Does grazer avg gregariousness leave 0.0 at all? If it's still flat after a
-  few hundred ticks with grazers alive, the opportunity cost is too steep -
-  drop the probability to greg/6 rather than deleting the gene.
-- Do grazers actually clump? `in a herd` in the viewer stats line is the quick
-  read. If it's 0 while grazers are 8+, they're being kept scattered by
-  fleeing, and the cover never gets a chance to matter.
-- Grazer camouflage read 0.0 at tick 1234, down from 0.538 - that's not
-  selection, that's a population of ONE whose genome happens to be blank.
-  Don't read the genome snapshot as a trend when population < ~4.
-- TRAIT_REGISTRY now holds THREE one-sided genes (grazers carry inert acuity,
-  hunters carry inert camouflage and gregariousness). Still haven't done the
-  per-species registry. Same reasoning as last time: do it as its own run,
-  nothing else in the diff, so a revert costs only the refactor. Given two
-  reverts in the last few runs, arguably do it soon while the mechanic
-  backlog is small.
+- Does grazer avg nerve climb off 0.0? It should, fast, while hunters are at
+  speed 1 - there is almost no downside right now. If it climbs and grazers
+  stop going extinct, the next thing to watch is whether HUNTER speed climbs
+  in response (lingering grazers are finally catchable) - that would be the
+  first real two-sided arms race this world has run.
+- `holding nerve` in the viewer stats line is the direct read: grazers that
+  can see a hunter and are eating anyway.
+- If nerve saturates at 3.0 and grazers then get farmed, the counter is
+  hunter-side and already obvious: speed. Don't add a gene for it.
+- Gregariousness/camouflage still read 0.0, but grazer population has been
+  1-2 for hundreds of ticks - that's a blank lone genome, not selection.
+  Don't read the snapshot as a trend below ~4 individuals.
+- TRAIT_REGISTRY now holds FOUR one-sided genes (grazers carry inert acuity;
+  hunters carry inert camouflage, gregariousness, nerve). The per-species
+  registry refactor is overdue. Do it as its own run, nothing else in the
+  diff, so a revert costs only the refactor.

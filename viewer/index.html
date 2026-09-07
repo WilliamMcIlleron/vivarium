@@ -140,6 +140,8 @@
   <div id="stats">loading...</div>
   <div id="legend">
     <span class="swatch"><span class="dot" style="background:var(--creature-high)"></span>grazer (brighter = more energy, fainter = more camouflage)</span>
+    <span class="swatch"><span class="ring" style="border-color:var(--creature-high)"></span>flight distance (the bubble a grazer keeps clear of hunters - nerve shrinks it, so a small ring is an animal that keeps eating with a predator in sight)</span>
+    <span class="swatch"><span class="ring" style="border-color:var(--resource);border-style:dashed"></span>hungry nerve (amber: this grazer is starving and letting hunters come closer than it otherwise would)</span>
     <span class="swatch"><span class="bar" style="background:var(--creature-high)"></span>herd bond (linked grazers are harder for a hunter to single out - brighter = deeper cover)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--creature-high);border-style:dotted"></span>gregariousness (how strongly a grazer walks to company instead of food)</span>
     <span class="swatch"><span class="tri" style="border-bottom-color:var(--hunter-high)"></span>hunter (brighter = more energy)</span>
@@ -160,6 +162,8 @@ const MIGRANT_MARK_TICKS = 40; // how long a migrant keeps its arrival halo - vi
 const MAX_TRAIT = 3;           // upper bound of the genome traits in TRAIT_REGISTRY - used only to normalise them for drawing
 const HERD_RADIUS = 2;         // must match HERD_RADIUS in rules/ecosystem.py - who counts as standing together
 const HERD_COVER_MAX = 2;      // must match HERD_COVER_MAX - only used to normalise the bond brightness
+const NERVE_HUNGER_LEVEL = 25; // must match NERVE_HUNGER_LEVEL in rules/ecosystem.py
+const NERVE_HUNGER_BOOST = 1.5;// must match NERVE_HUNGER_BOOST
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 const stats = document.getElementById('stats');
@@ -176,6 +180,16 @@ function resize() {
 }
 window.addEventListener('resize', resize);
 resize();
+
+// Mirror of _panic_radius() in rules/ecosystem.py: how close a hunter has to
+// get before this grazer stops feeding and runs. Kept in sync by hand - it's
+// two lines, and the alternative is the sim exporting a derived number it
+// doesn't itself need to store.
+function panicRadius(c) {
+  let nerve = (c.traits && c.traits.nerve) || 0;
+  if ((c.energy ?? 0) < NERVE_HUNGER_LEVEL) nerve *= NERVE_HUNGER_BOOST;
+  return Math.max(1, (c.sense_range || 0) - nerve);
+}
 
 function lerpColor(a, b, t) {
   const pa = a.match(/\w\w/g).map(h => parseInt(h, 16));
@@ -362,8 +376,8 @@ async function fetchLatestLore() {
 // what the next arrival of that species will roughly look like - and, when a
 // species is currently extinct, the only trace of it left in the world.
 // Each species is shown with the genes it actually uses: concealment
-// (camouflage) and sociability (gregariousness) for grazers, acuity for
-// hunters.
+// (camouflage), sociability (gregariousness) and composure (nerve) for
+// grazers, acuity for hunters.
 function bloodline(records, genes) {
   if (!records || !records.length) return 'nothing remembered';
   const avg = key => records.reduce((sum, g) => sum + (g[key] || 0), 0) / records.length;
@@ -416,6 +430,32 @@ function draw(now) {
   }
 
   const creatures = interpolatedCreatures(now);
+
+  // flight distance: the bubble of ground a grazer insists on keeping clear
+  // of hunters (see _panic_radius in rules/ecosystem.py). A grazer sees a
+  // predator out to its full sense_range, but only bolts once one crosses
+  // this ring - so the ring is the single most important invisible number in
+  // the world made visible. A wide ring is a jumpy animal that spends its
+  // life running and starves doing it; a tight ring is one holding its nerve
+  // over a meal. The ring turns amber and dashed when hunger is what's
+  // shrinking it, because a starving grazer takes risks a fed one wouldn't.
+  for (const c of creatures) {
+    if (c.species === 'hunter') continue;
+    const radius = panicRadius(c);
+    const hungry = (c.energy ?? 0) < NERVE_HUNGER_LEVEL;
+    const held = Math.max(0, Math.min(1, ((c.sense_range || 0) - radius) / MAX_TRAIT));
+    const cx = c.drawX * cell + cell / 2;
+    const cy = c.drawY * cell + cell / 2;
+    ctx.globalAlpha = c.alpha * (0.09 + 0.20 * held);
+    ctx.strokeStyle = hungry ? '#e8c07d' : '#9fffc4';
+    ctx.lineWidth = Math.max(0.6, cell * 0.025);
+    if (hungry) ctx.setLineDash([cell * 0.22, cell * 0.22]);
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius * cell, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+  }
 
   // herd bonds: every pair of grazers within HERD_RADIUS tiles is joined by a
   // soft green thread. That closeness is not decoration - each neighbour
@@ -575,18 +615,33 @@ function draw(now) {
   const hunterCount = creatures.filter(c => c.species === 'hunter').length;
   const herdedCount = creatures.filter(c => c.species !== 'hunter' && (c.herd_cover || 0) > 0).length;
 
+  // Grazers that can currently see a hunter and are choosing to keep feeding
+  // anyway - i.e. a predator inside sense_range but outside the flight ring.
+  // This is the number the nerve gene exists to move: when it's above zero,
+  // something out there is eating with a hunter in view instead of running
+  // itself to death.
+  const chebyshev = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
+  const nerveCount = creatures.filter(c => {
+    if (c.species === 'hunter') return false;
+    const radius = panicRadius(c);
+    return creatures.some(h => h.species === 'hunter'
+      && chebyshev(h, c) <= (c.sense_range || 0)
+      && chebyshev(h, c) > radius);
+  }).length;
+
   stats.innerHTML =
     `tick <b>${world.tick}</b>` +
     `<span>grazers <b>${world.grazers ?? grazerCount}</b></span>` +
     `<span>hunters <b>${world.hunters ?? hunterCount}</b></span>` +
     `<span>in a herd <b>${herdedCount}</b></span>` +
+    `<span>holding nerve <b>${nerveCount}</b></span>` +
     `<span>resources <b>${(world.resources || []).length}</b></span>` +
     `<span>carcasses <b>${(world.carrion || []).length}</b></span>`;
 
   const lineage = world.lineage || {};
   memoryEl.innerHTML =
     `<span>remembered bloodline (what the next migrant inherits)</span>` +
-    `<span>grazer <b>${bloodline(lineage.grazer, [['camouflage', 'camo'], ['gregariousness', 'herd']])}</b></span>` +
+    `<span>grazer <b>${bloodline(lineage.grazer, [['camouflage', 'camo'], ['gregariousness', 'herd'], ['nerve', 'nerve']])}</b></span>` +
     `<span>hunter <b>${bloodline(lineage.hunter, [['acuity', 'acuity']])}</b></span>`;
 }
 

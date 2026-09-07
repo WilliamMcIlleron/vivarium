@@ -20,6 +20,13 @@ see HERD_RADIUS); a hunter's `acuity` adds back to it, at a per-tick energy
 cost. Concealment is something prey can buy two different ways, and seeing
 through either is something a predator has to be able to afford.
 
+Fleeing, meanwhile, is not a reflex. A grazer that spots a hunter compares the
+distance to its own flight distance - its sense_range, shrunk by the `nerve`
+gene and shrunk further when it is hungry - and only bolts if the hunter is
+inside it. Nerve is what lets an animal finish a meal with a predator in view,
+which in a world this crowded with hunters is the difference between eating and
+starving; it is paid for in the risk of being caught.
+
 Anything that dies of starvation or old age leaves a Carrion behind: a static,
 rotting carcass that hunters can scavenge. Carrion is the only food a hunter
 can get without catching something that is actively fleeing it.
@@ -82,6 +89,31 @@ CARRION_DECAY = 40                  # ticks a carcass lasts before it rots away
 HERD_RADIUS = 2
 HERD_COVER_PER_NEIGHBOR = 0.5
 HERD_COVER_MAX = 2.0
+
+# Nerve: how close a hunter has to get before a grazer abandons what it is
+# doing and runs.
+#
+# Fleeing used to be a pure reflex - any hunter anywhere inside sense_range and
+# the grazer bolted - and by tick 1728 that reflex was killing the species.
+# Grazers had evolved sense_range 7 and speed 5 against six hunters, so the
+# 15x15 box around every grazer nearly always contained a predator: the animal
+# spent its entire life running, burning 5 energy a tick (MOVE_COST scales with
+# speed) and never standing on a resource long enough to eat one. GRAZERS
+# EXTINCT, over and over, from starvation rather than from predation - while
+# the hunters, who had drifted down to speed 1 and could not have caught a
+# fleeing grazer at all, lived comfortably off the carcasses.
+#
+# `nerve` makes flight a decision instead of a reflex. It subtracts from the
+# distance at which a grazer panics, so a nervy animal keeps feeding while a
+# predator is still a few tiles off, and it costs exactly what you would
+# expect: the hunter gets closer. Hunger multiplies it by NERVE_HUNGER_BOOST,
+# because a grazer that is about to starve is risking very little by staying -
+# desperation is its own pressure, and it shows up precisely in the animals
+# that were going to die anyway. The panic radius never drops below one tile
+# (nerve buys patience, not suicide), and at nerve 0 it is exactly sense_range,
+# i.e. bit-for-bit the world's original reflex.
+NERVE_HUNGER_LEVEL = 25   # energy below which a grazer accepts the extra risk
+NERVE_HUNGER_BOOST = 1.5  # multiplier applied to nerve while hungry
 
 # How many genomes the world remembers per species (see World.lineage and
 # _spawn_creature's `lineage` argument). Only creatures that actually
@@ -176,13 +208,19 @@ TERRAIN_CODES = "wsgf"  # water, sand, grass, forest
 # rather than in a flat energy charge, since a grazer standing in the herd is
 # a grazer not standing on a resource.
 #
-# None of the three is species-scoped - the registry has no concept of
+# nerve: how close a hunter has to get before a grazer stops feeding and runs
+# (see NERVE_HUNGER_LEVEL). It shrinks the panic radius, never the grazer's
+# perception - a nervy grazer sees the predator perfectly well and keeps
+# eating anyway - and its price is the shorter head start it leaves itself.
+#
+# None of the four is species-scoped - the registry has no concept of
 # "grazer-only", so each species carries the other's genes inertly, since
 # nothing on that side ever reads them.
 TRAIT_REGISTRY: dict[str, tuple[float, float, float, float]] = {
     "camouflage": (0.0, 0.5, 0.0, 3.0),
     "acuity": (0.0, 0.5, 0.0, 3.0),
     "gregariousness": (0.0, 0.5, 0.0, 3.0),
+    "nerve": (0.0, 0.5, 0.0, 3.0),
 }
 
 
@@ -352,9 +390,11 @@ class World:
         # movement: hunters head for whichever is closer, the nearest grazer
         # or the nearest carcass - live prey is worth more but runs away,
         # carrion is worth less but holds still. Grazers flee the nearest
-        # hunter in sense range if one is close; otherwise they either drift
-        # toward company (gregariousness) or head for the nearest resource,
-        # falling back to a random walk if nothing relevant is in sense range.
+        # hunter in sense range if it is inside their flight distance (see
+        # _panic_radius - a grazer with nerve lets a predator come closer
+        # before it gives up on eating); otherwise they either drift toward
+        # company (gregariousness) or head for the nearest resource, falling
+        # back to a random walk if nothing relevant is in sense range.
         # Grazers reusing sense_range for threat detection means the same
         # mutating gene trades off "finds food better" against "spots
         # predators better" - no separate dial.
@@ -376,7 +416,7 @@ class World:
                     _move_random(creature)
             else:
                 threat = _nearest_creature(creature, hunters)
-                if threat is not None:
+                if threat is not None and _flees(creature, threat):
                     _move_away(creature, threat)
                 else:
                     target = _nearest_resource(creature, self.resources)
@@ -571,6 +611,29 @@ def _update_herd_cover(grazers: list[Creature]) -> None:
         grazer.herd_cover = min(HERD_COVER_MAX, HERD_COVER_PER_NEIGHBOR * neighbors)
 
 
+def _panic_radius(grazer: Creature) -> float:
+    """How close a hunter has to get before this grazer drops what it's doing
+    and runs. Starts at its full sense_range - so a grazer with nerve 0 bolts
+    at the first predator it can see, exactly as this world has always
+    worked - and shrinks by the nerve gene, amplified while the animal is
+    hungry enough that a missed meal is its own kind of death. Never below
+    one tile: nerve buys patience, not suicide.
+    """
+    nerve = grazer.trait("nerve")
+    if grazer.energy < NERVE_HUNGER_LEVEL:
+        nerve *= NERVE_HUNGER_BOOST
+    return max(1.0, grazer.sense_range - nerve)
+
+
+def _flees(grazer: Creature, threat: Creature) -> bool:
+    """Whether a spotted hunter is close enough to be worth running from.
+    Chebyshev distance, the same box shape sense_range uses, so the flight
+    bubble and the sense box are the same shape and differ only in size.
+    """
+    distance = max(abs(threat.x - grazer.x), abs(threat.y - grazer.y))
+    return distance <= _panic_radius(grazer)
+
+
 def _herd_target(
     creature: Creature, grazers: list[Creature], food: "Resource | None"
 ) -> "Creature | None":
@@ -644,7 +707,9 @@ def _nearest_creature(
     # paying (in energy every tick, see ACUITY_COST) to see through it.
     # Grazers scanning for hunter threats, and grazers looking for each other,
     # are unaffected (camouflage_aware defaults to False), so none of this
-    # ever helps the side it wasn't meant for.
+    # ever helps the side it wasn't meant for. Note that a grazer's `nerve`
+    # doesn't belong here either: it changes what a grazer DOES about a
+    # hunter it has seen, never whether it sees it.
     def _effective_range(other: Creature) -> float:
         if not camouflage_aware:
             return creature.sense_range
