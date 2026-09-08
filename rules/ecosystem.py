@@ -13,19 +13,27 @@ Two species share the same grid:
     which is what makes this a real predator/prey pressure rather than two
     populations that happen to coexist.
 
-Three genes fight over the same number - the hunter's effective sense_range
-when it is looking for live prey. A grazer's `camouflage` shrinks it (hiding as
-an individual); a grazer's herd cover shrinks it further (hiding as a crowd -
-see HERD_RADIUS); a hunter's `acuity` adds back to it, at a per-tick energy
-cost. Concealment is something prey can buy two different ways, and seeing
-through either is something a predator has to be able to afford.
+Three genes and the ground itself fight over the same number - the hunter's
+effective sense_range when it is looking for live prey. A grazer's `camouflage`
+shrinks it (hiding as an individual); a grazer's herd cover shrinks it further
+(hiding as a crowd - see HERD_RADIUS); forest canopy shrinks it again for any
+grazer standing under it (see TERRAIN_COVER); a hunter's `acuity` adds back to
+it, at a per-tick energy cost. Concealment is something prey can buy three
+different ways, and seeing through any of them is something a predator has to
+be able to afford.
+
+The map is therefore no longer scenery. Its counterweight is food: resources
+grow according to how much light reaches the ground (TERRAIN_FERTILITY), so
+the safest tiles on the grid are also the emptiest ones. Cover and food are in
+different places, and a grazer that wants to eat has to leave the trees.
 
 Fleeing, meanwhile, is not a reflex. A grazer that spots a hunter compares the
 distance to its own flight distance - its sense_range, shrunk by the `nerve`
 gene and shrunk further when it is hungry - and only bolts if the hunter is
 inside it. Nerve is what lets an animal finish a meal with a predator in view,
 which in a world this crowded with hunters is the difference between eating and
-starving; it is paid for in the risk of being caught.
+starving; it is paid for in the risk of being caught. When it does run, it runs
+for the trees rather than in a straight line (see _move_away).
 
 Anything that dies of starvation or old age leaves a Carrion behind: a static,
 rotting carcass. It is the only food a hunter can get without catching
@@ -205,10 +213,40 @@ GRAZER_MIGRATION_RATE = 0.05
 
 SPECIES = ("grazer", "hunter")
 
-# Terrain is a fixed, cosmetic layer generated once at world creation - it's
-# the "engine" the viewer renders onto, not something evolve runs are meant
-# to regenerate or read. step() never touches it.
+# Terrain is a fixed landscape generated once at world creation. Nothing here
+# ever regenerates or redesigns it - the map you get is the map the world
+# keeps - but as of this run it is no longer inert decoration: step() reads it
+# through the two tables below.
 TERRAIN_CODES = "wsgf"  # water, sand, grass, forest
+
+# What the ground is worth to whatever is standing on it.
+#
+# TERRAIN_COVER is concealment, and it enters the world at exactly the same
+# place camouflage and herd cover do: it subtracts from a hunter's effective
+# sense_range when that hunter is looking for a grazer standing on that tile
+# (see _nearest_creature). Only the canopy hides anything; grass, sand and
+# open water are all the same bare ground they always were. It is prey-side
+# only - a hunter in the trees is as visible as it ever was, because grazers
+# never use the camouflage_aware path - and `acuity` already cancels it point
+# for point, the same counter that exists for the other two.
+#
+# Why now: this world has held 0 grazers with GRAZERS EXTINCT in nearly every
+# tick since 1813, and the reason a re-migrating grazer never establishes is
+# that on 1600 identical tiles there is nowhere to be that is safer than
+# anywhere else. A refuge is a different kind of fix from a gene - it's a
+# place, not a stat, so it helps the animal that has not had time to evolve
+# anything yet.
+#
+# TERRAIN_FERTILITY is the price of that refuge. Resources are drawn toward
+# ground that gets light, so the canopy grows almost nothing: the safest tiles
+# on the map are also the emptiest. The total spawn rate is untouched
+# (RESOURCE_SPAWN_RATE still decides IF a resource appears, this only decides
+# WHERE), so this moves food around rather than adding or removing any - it
+# buys the hiding place with hunger instead of with an energy charge bolted on
+# the side, the same way gregariousness is paid for in missed meals.
+TERRAIN_COVER = {"f": 1.5, "g": 0.0, "s": 0.0, "w": 0.0}
+TERRAIN_FERTILITY = {"g": 1.0, "s": 0.8, "w": 0.6, "f": 0.25}
+FERTILITY_ATTEMPTS = 12   # rejection-sampling tries before a resource lands anywhere
 
 # Extensible genome: name -> (default, mutation_step, min, max). speed and
 # sense_range stay first-class Creature fields since core movement code
@@ -224,8 +262,8 @@ TERRAIN_CODES = "wsgf"  # water, sand, grass, forest
 # acuity: the hunter's half of that same subtraction. It ADDS to a hunter's
 # effective sense_range, but only when the hunter is looking for live prey -
 # never for carrion, never for anything else - so it is precisely a counter to
-# camouflage rather than a general-purpose senses upgrade. Unlike camouflage
-# it is not free: see ACUITY_COST.
+# camouflage, herd cover and canopy rather than a general-purpose senses
+# upgrade. Unlike camouflage it is not free: see ACUITY_COST.
 #
 # gregariousness: how strongly a grazer with nothing chasing it will walk
 # toward the nearest grazer it can see instead of toward food. That's what
@@ -338,8 +376,10 @@ class World:
         remembered = data.get("lineage") or {}
         w.lineage = {s: list(remembered.get(s, [])) for s in SPECIES}
         # Saves from before terrain existed have no "terrain" key - generate
-        # one rather than fail, since terrain is cosmetic and has no bearing
-        # on anything the simulation itself depends on.
+        # one rather than fail. A world with no terrain at all still runs:
+        # every lookup falls back to open grass (see _terrain_at), i.e. no
+        # cover anywhere and uniform fertility, exactly how this world
+        # behaved before the ground meant anything.
         w.terrain = data.get("terrain") or _generate_terrain()
         return w
 
@@ -380,10 +420,13 @@ class World:
             carcass.age += 1
         self.carrion = [k for k in self.carrion if k.age < CARRION_DECAY]
 
+        # Food grows where light reaches the ground: same per-tick chance of a
+        # resource as always, but WHERE it lands is weighted by biome (see
+        # TERRAIN_FERTILITY). Open grass is the larder, the canopy is nearly
+        # bare - which is what makes the forest a refuge you have to leave.
         if random.random() < RESOURCE_SPAWN_RATE:
-            self.resources.append(
-                Resource(x=random.randrange(GRID_SIZE), y=random.randrange(GRID_SIZE))
-            )
+            x, y = _forage_location(self.terrain)
+            self.resources.append(Resource(x=x, y=y))
 
         # Migrants are drawn from the world's genetic memory (see
         # LINEAGE_MEMORY): a descendant of the last stock that bred here,
@@ -427,22 +470,26 @@ class World:
         # ever walks toward one. Grazers flee the nearest hunter in sense
         # range if it is inside their flight distance (see _panic_radius - a
         # grazer with nerve lets a predator come closer before it gives up on
-        # eating); otherwise they either drift toward company (gregariousness)
-        # or head for the nearest resource, falling back to a random walk if
-        # nothing relevant is in sense range.
+        # eating), and they flee toward the best cover they can reach rather
+        # than in a straight line; otherwise they either drift toward company
+        # (gregariousness) or head for the nearest resource, falling back to a
+        # random walk if nothing relevant is in sense range.
         # Grazers reusing sense_range for threat detection means the same
         # mutating gene trades off "finds food better" against "spots
         # predators better" - no separate dial.
-        # Layered on top of that, three things pull on the hunter's
-        # prey-detection number and nothing else: a grazer's `camouflage` and
-        # its herd cover subtract from the hunter's effective sense_range, and
-        # the hunter's `acuity` adds back to it. None of them does anything
-        # for a carcass: hiding is a behaviour of the living, and a body in
-        # the open takes no special eye to find.
+        # Layered on top of that, four things pull on the hunter's
+        # prey-detection number and nothing else: a grazer's `camouflage`, its
+        # herd cover and the canopy over the tile it's standing on all
+        # subtract from the hunter's effective sense_range, and the hunter's
+        # `acuity` adds back to it. None of them does anything for a carcass:
+        # hiding is a behaviour of the living, and a body in the open takes no
+        # special eye to find.
         for creature in self.creatures:
             creature.age += 1
             if creature.species == "hunter":
-                prey = _nearest_creature(creature, grazers, camouflage_aware=True)
+                prey = _nearest_creature(
+                    creature, grazers, camouflage_aware=True, terrain=self.terrain
+                )
                 carcass = _nearest_carrion(creature, self.carrion)
                 target = _closer_target(creature, prey, carcass)
                 if target is not None:
@@ -452,7 +499,7 @@ class World:
             else:
                 threat = _nearest_creature(creature, hunters)
                 if threat is not None and _flees(creature, threat):
-                    _move_away(creature, threat)
+                    _move_away(creature, threat, self.terrain)
                 else:
                     target = _nearest_resource(creature, self.resources)
                     companion = _herd_target(creature, grazers, target)
@@ -558,7 +605,9 @@ def _generate_terrain() -> list[str]:
     instead of single-cell salt-and-pepper static, then normalized and cut
     into four biome bands. Generated once and saved - not regenerated on
     later loads, so it's a stable landscape rather than a different one
-    every tick.
+    every tick. The smoothing matters more than it used to: contiguous
+    forest is a refuge a grazer can run into, single scattered cells would
+    only be noise.
     """
     grid = [[random.random() for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
 
@@ -596,6 +645,47 @@ def _generate_terrain() -> list[str]:
                 chars.append("f")
         rows.append("".join(chars))
     return rows
+
+
+def _terrain_at(terrain: list[str] | None, x: int, y: int) -> str:
+    """The biome code of one tile, defaulting to open grass for anything the
+    map doesn't cover - a world loaded from a save with no terrain, or a
+    lookup off the end of a short row. Grass is the neutral choice: no cover,
+    full fertility, i.e. exactly how this world behaved before the ground
+    meant anything.
+    """
+    if not terrain:
+        return "g"
+    if not (0 <= y < len(terrain)):
+        return "g"
+    row = terrain[y]
+    if not (0 <= x < len(row)):
+        return "g"
+    return row[x]
+
+
+def _cover_at(terrain: list[str] | None, x: int, y: int) -> float:
+    """How much this tile hides whatever is standing on it (TERRAIN_COVER)."""
+    return TERRAIN_COVER.get(_terrain_at(terrain, x, y), 0.0)
+
+
+def _forage_location(terrain: list[str] | None) -> tuple[int, int]:
+    """Where a new resource lands. Rejection sampling against
+    TERRAIN_FERTILITY - pick a tile, keep it with that biome's probability,
+    try again otherwise - so no per-tile weight table has to be built or kept
+    in sync with the map. After FERTILITY_ATTEMPTS the last draw is taken
+    regardless, which keeps the total spawn RATE exactly what
+    RESOURCE_SPAWN_RATE says it is: this decides where food grows, never how
+    much of it there is.
+    """
+    x = random.randrange(GRID_SIZE)
+    y = random.randrange(GRID_SIZE)
+    for _ in range(FERTILITY_ATTEMPTS):
+        if random.random() < TERRAIN_FERTILITY.get(_terrain_at(terrain, x, y), 1.0):
+            return x, y
+        x = random.randrange(GRID_SIZE)
+        y = random.randrange(GRID_SIZE)
+    return x, y
 
 
 def _spawn_creature(
@@ -718,7 +808,8 @@ def _nearest_carrion(creature: Creature, carrion: list[Carrion]) -> Carrion | No
     # Only ever called for a hunter looking for something to scavenge, so the
     # edibility filter belongs here rather than at the call site: an inedible
     # carcass is not a target, and a hunter should not spend its movement
-    # walking to one.
+    # walking to one. Terrain doesn't enter into it - a body in the trees is
+    # still a body, and hiding is a behaviour of the living.
     in_range = [
         k for k in carrion
         if _edible(k)
@@ -747,21 +838,26 @@ def _closer_target(
 
 
 def _nearest_creature(
-    creature: Creature, others: list[Creature], camouflage_aware: bool = False
+    creature: Creature,
+    others: list[Creature],
+    camouflage_aware: bool = False,
+    terrain: list[str] | None = None,
 ) -> Creature | None:
     # camouflage_aware is only passed True for a hunter scanning for grazers.
-    # It's the predator/prey detection path, and three things pull on the same
-    # number there: each candidate's own camouflage AND its herd cover shrink
-    # the searching creature's effective sense_range just for that candidate,
-    # and the searcher's own acuity adds back to it. So a well-hidden grazer -
-    # by pigment, by company, or both - can be standing well inside a hunter's
-    # nominal sense_range and still go undetected, unless that hunter is
-    # paying (in energy every tick, see ACUITY_COST) to see through it.
+    # It's the predator/prey detection path, and four things pull on the same
+    # number there: each candidate's own camouflage, its herd cover AND the
+    # canopy over the tile it's standing on shrink the searching creature's
+    # effective sense_range just for that candidate, and the searcher's own
+    # acuity adds back to it. So a well-hidden grazer - by pigment, by
+    # company, by standing in the trees, or all three - can be well inside a
+    # hunter's nominal sense_range and still go undetected, unless that hunter
+    # is paying (in energy every tick, see ACUITY_COST) to see through it.
     # Grazers scanning for hunter threats, and grazers looking for each other,
     # are unaffected (camouflage_aware defaults to False), so none of this
-    # ever helps the side it wasn't meant for. Note that a grazer's `nerve`
-    # doesn't belong here either: it changes what a grazer DOES about a
-    # hunter it has seen, never whether it sees it.
+    # ever helps the side it wasn't meant for - a hunter in the forest is as
+    # visible to its prey as it ever was. Note that a grazer's `nerve` doesn't
+    # belong here either: it changes what a grazer DOES about a hunter it has
+    # seen, never whether it sees it.
     def _effective_range(other: Creature) -> float:
         if not camouflage_aware:
             return creature.sense_range
@@ -770,6 +866,7 @@ def _nearest_creature(
             creature.sense_range
             - other.trait("camouflage")
             - other.herd_cover
+            - _cover_at(terrain, other.x, other.y)
             + creature.trait("acuity"),
         )
 
@@ -791,7 +888,51 @@ def _move_toward(creature: Creature, target: "Resource | Creature | Carrion") ->
     creature.y = _wrap(creature.y + dy)
 
 
-def _move_away(creature: Creature, threat: "Creature") -> None:
+def _move_away(
+    creature: Creature, threat: "Creature", terrain: list[str] | None = None
+) -> None:
+    """Flight - toward the trees where there are any.
+
+    A fleeing grazer used to move the full length of its speed in a straight
+    line directly away from the hunter, which on a featureless grid was the
+    only sensible thing to do. Now that the canopy actually conceals
+    (TERRAIN_COVER), running in a straight line is often the WORSE move: a
+    tile of forest one step off the escape vector takes 1.5 off the hunter's
+    effective sense_range, which can drop the grazer out of its detection box
+    entirely, while another two tiles of open ground only buys distance from a
+    predator that can still see exactly where it went.
+
+    So the grazer looks at every tile it could reach this tick, keeps the ones
+    that actually open the gap (strictly greater Chebyshev distance, measured
+    before wrapping so the map seam can't be mistaken for a head start), and
+    takes the best cover among them, breaking ties on distance. That's the
+    tradeoff in one line: cover first, ground second. If nothing increases the
+    distance the animal is cornered, and it falls back to exactly the old
+    behaviour - a straight-line shove away, or a random scramble if it's
+    standing on the hunter's own tile.
+    """
+    here = max(abs(creature.x - threat.x), abs(creature.y - threat.y))
+    best_key = None
+    best_tile = None
+    for dx in range(-creature.speed, creature.speed + 1):
+        for dy in range(-creature.speed, creature.speed + 1):
+            gap = max(abs(creature.x + dx - threat.x), abs(creature.y + dy - threat.y))
+            if gap <= here:
+                continue
+            nx, ny = _wrap(creature.x + dx), _wrap(creature.y + dy)
+            key = (
+                _cover_at(terrain, nx, ny),
+                gap,
+                abs(creature.x + dx - threat.x) + abs(creature.y + dy - threat.y),
+            )
+            if best_key is None or key > best_key:
+                best_key = key
+                best_tile = (nx, ny)
+
+    if best_tile is not None:
+        creature.x, creature.y = best_tile
+        return
+
     dx = _clamp(creature.x - threat.x, -creature.speed, creature.speed)
     dy = _clamp(creature.y - threat.y, -creature.speed, creature.speed)
     if dx == 0 and dy == 0:

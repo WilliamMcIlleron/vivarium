@@ -37,11 +37,13 @@ probably the one not to make.
   become, distinct from the engineering `changelog.md`. Shown in the viewer
   as "latest chronicle." Write it like you're actually looking at this
   specific world's specific state, not a generic template.
-- The world now has a terrain layer (water/sand/grass/forest, generated once at
+- The world has a terrain layer (water/sand/grass/forest, generated once at
   world creation, rendered in `viewer/index.html`) plus a day/night cycle and
-  drifting fog for atmosphere. This is fixed "engine" scaffolding, not content -
-  it's currently purely cosmetic (creatures ignore it completely). Don't
-  regenerate or redesign the terrain itself.
+  drifting fog. The MAP is fixed "engine" scaffolding - don't regenerate or
+  redesign the terrain itself - but it is no longer inert: as of tick 1889,
+  forest canopy conceals a grazer from hunters and biome fertility decides
+  where resources grow (`TERRAIN_COVER` / `TERRAIN_FERTILITY`). The day/night
+  cycle and fog are still purely cosmetic.
 - The ecosystem now has two species (`rules/ecosystem.py`): grazers (eat resources)
   and hunters (eat grazers, flee-and-chase movement, faster but harder to reproduce).
   Grazers detect hunters using the same `sense_range` gene they use to find food -
