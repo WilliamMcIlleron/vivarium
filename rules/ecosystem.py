@@ -28,8 +28,11 @@ which in a world this crowded with hunters is the difference between eating and
 starving; it is paid for in the risk of being caught.
 
 Anything that dies of starvation or old age leaves a Carrion behind: a static,
-rotting carcass that hunters can scavenge. Carrion is the only food a hunter
-can get without catching something that is actively fleeing it.
+rotting carcass. It is the only food a hunter can get without catching
+something that is actively fleeing it - but only a grazer's body counts. A
+hunter's corpse is inedible to other hunters (see SCAVENGEABLE_CARRION), so
+the entire scavenging supply is tied to the prey population and a predator can
+never live off its own dead.
 
 The world also keeps a genetic memory (`World.lineage`): the genomes of the
 creatures that actually managed to reproduce here. When a species dies out and
@@ -68,6 +71,29 @@ HUNT_ENERGY = 40                    # energy a hunter gains from eating a grazer
 # "HUNTERS EXTINCT" say this world was missing.
 CARRION_ENERGY = 30
 CARRION_DECAY = 40                  # ticks a carcass lasts before it rots away
+
+# Whose bodies a hunter will actually eat.
+#
+# The paragraph above claims the carcass supply "scales with the grazer
+# population". That was only ever half true, because nothing checked whose
+# body it was: hunters have been eating hunters. Tick 1870 is what that looks
+# like - zero grazers, five hunters, and GRAZERS EXTINCT in nearly every tick
+# since 1813. With no prey anywhere on the grid the only deaths are hunter
+# deaths, and each one drops CARRION_ENERGY straight back into the hunter
+# population. That closed cannibal loop doesn't really feed the predators; it
+# lets them die very slowly, five at a time, and it means a lone grazer
+# migrating in at tick 1824 walks onto a grid that still has five hunters
+# standing on it and is gone before it can breed. The predator population had
+# stopped depending on prey at all, which is the one thing it was never
+# supposed to be able to do.
+#
+# So a carcass now remembers what it was, and only a grazer's body is food. A
+# hunter's corpse is scenery: it rots where it fell, unwalked-to and uneaten.
+# That restores the negative feedback carrion was designed to have - no
+# grazers means no carrion means the hunters genuinely starve out, which is
+# exactly the window a re-migrating grazer needs - without touching predation,
+# energy values, or any gene.
+SCAVENGEABLE_CARRION = ("grazer",)
 
 # Safety in numbers. Every other grazer within HERD_RADIUS tiles (Chebyshev,
 # the same box shape sense_range uses) gives a grazer HERD_COVER_PER_NEIGHBOR
@@ -263,10 +289,14 @@ class Resource:
 @dataclass
 class Carrion:
     """A carcass left behind by a non-predation death. Static, rots away
-    after CARRION_DECAY ticks, edible by hunters only."""
+    after CARRION_DECAY ticks. `species` is whose body it is, and it decides
+    whether the carcass is food at all: only the species listed in
+    SCAVENGEABLE_CARRION can be eaten, so a hunter's remains are inert
+    scenery rather than a meal for the next hunter along."""
     x: int
     y: int
     age: int = 0
+    species: str = "grazer"
 
 
 @dataclass
@@ -298,7 +328,10 @@ class World:
         w.creatures = [Creature(**c) for c in data.get("creatures", [])]
         w.resources = [Resource(**r) for r in data.get("resources", [])]
         # Saves from before carrion existed simply start with none on the
-        # ground - the first natural death repopulates it.
+        # ground - the first natural death repopulates it. Carcasses saved
+        # before bodies had a species default to "grazer", i.e. edible, which
+        # is how they behaved when they were written; they rot away within
+        # CARRION_DECAY ticks either way.
         w.carrion = [Carrion(**k) for k in data.get("carrion", [])]
         # Same for lineage: a save from before the world remembered anything
         # starts blank, and the first birth of each species fills it in.
@@ -388,13 +421,15 @@ class World:
         _update_herd_cover(grazers)
 
         # movement: hunters head for whichever is closer, the nearest grazer
-        # or the nearest carcass - live prey is worth more but runs away,
-        # carrion is worth less but holds still. Grazers flee the nearest
-        # hunter in sense range if it is inside their flight distance (see
-        # _panic_radius - a grazer with nerve lets a predator come closer
-        # before it gives up on eating); otherwise they either drift toward
-        # company (gregariousness) or head for the nearest resource, falling
-        # back to a random walk if nothing relevant is in sense range.
+        # or the nearest carcass they can actually eat - live prey is worth
+        # more but runs away, carrion is worth less but holds still. A dead
+        # hunter is neither: it isn't food (SCAVENGEABLE_CARRION), so nothing
+        # ever walks toward one. Grazers flee the nearest hunter in sense
+        # range if it is inside their flight distance (see _panic_radius - a
+        # grazer with nerve lets a predator come closer before it gives up on
+        # eating); otherwise they either drift toward company (gregariousness)
+        # or head for the nearest resource, falling back to a random walk if
+        # nothing relevant is in sense range.
         # Grazers reusing sense_range for threat detection means the same
         # mutating gene trades off "finds food better" against "spots
         # predators better" - no separate dial.
@@ -456,8 +491,10 @@ class World:
                 self.events.append(f"hunt: grazer {prey.id[:8]} eaten at ({hunter.x},{hunter.y})")
 
         # scavenging: a hunter that made no kill this tick eats a carcass it's
-        # standing on. A hunter never gets both in one tick - a kill is the
-        # better meal and taking both would double-dip a single tile.
+        # standing on - if that carcass is prey. A hunter never gets both a
+        # kill and a scavenge in one tick (a kill is the better meal and
+        # taking both would double-dip a single tile), and it never gets a
+        # meal out of another hunter at all.
         for hunter in hunters:
             if hunter.id in fed_hunter_ids:
                 continue
@@ -498,9 +535,12 @@ class World:
                 survivors.append(creature)
             else:
                 # Starvation and old age leave a body; being eaten does not,
-                # since the hunter already took the energy.
+                # since the hunter already took the energy. The body remembers
+                # what it was, because only a grazer's is edible.
                 self.events.append(f"death: {creature.id[:8]} at age {creature.age}")
-                self.carrion.append(Carrion(x=creature.x, y=creature.y))
+                self.carrion.append(
+                    Carrion(x=creature.x, y=creature.y, species=creature.species)
+                )
 
         self.creatures = survivors + newborns
 
@@ -667,10 +707,22 @@ def _nearest_resource(creature: Creature, resources: list[Resource]) -> Resource
     return min(in_range, key=lambda r: abs(r.x - creature.x) + abs(r.y - creature.y))
 
 
+def _edible(carcass: Carrion) -> bool:
+    """Whether this body is food. Only prey species are (see
+    SCAVENGEABLE_CARRION) - a hunter's remains are inert, so hunters neither
+    walk toward them nor gain anything from standing on them."""
+    return carcass.species in SCAVENGEABLE_CARRION
+
+
 def _nearest_carrion(creature: Creature, carrion: list[Carrion]) -> Carrion | None:
+    # Only ever called for a hunter looking for something to scavenge, so the
+    # edibility filter belongs here rather than at the call site: an inedible
+    # carcass is not a target, and a hunter should not spend its movement
+    # walking to one.
     in_range = [
         k for k in carrion
-        if abs(k.x - creature.x) <= creature.sense_range
+        if _edible(k)
+        and abs(k.x - creature.x) <= creature.sense_range
         and abs(k.y - creature.y) <= creature.sense_range
     ]
     if not in_range:
@@ -764,8 +816,10 @@ def _resource_at(resources: list[Resource], x: int, y: int) -> Resource | None:
 
 
 def _carrion_at(carrion: list[Carrion], x: int, y: int) -> Carrion | None:
+    # Same as _nearest_carrion: this is the hunter's scavenging path, so an
+    # inedible body on the tile is simply not there as far as it's concerned.
     for k in carrion:
-        if k.x == x and k.y == y:
+        if k.x == x and k.y == y and _edible(k):
             return k
     return None
 

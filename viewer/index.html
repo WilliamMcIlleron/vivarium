@@ -14,6 +14,7 @@
     --hunter-high: #ff8f6b;
     --resource: #e8c07d;
     --carrion: #b9b2a4;
+    --carrion-inedible: #7a544c;
     --migrant: #c9b6ff;
     --text: #cfe8d6;
     --muted: #5c7266;
@@ -147,7 +148,8 @@
     <span class="swatch"><span class="tri" style="border-bottom-color:var(--hunter-high)"></span>hunter (brighter = more energy)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--hunter-high)"></span>acuity (rings around a hunter - sees through camouflage and herds, costs energy every tick)</span>
     <span class="swatch"><span class="dot" style="background:var(--resource)"></span>resource</span>
-    <span class="swatch"><span class="ring" style="border-color:var(--carrion)"></span>carcass (fades as it rots)</span>
+    <span class="swatch"><span class="ring" style="border-color:var(--carrion)"></span>carcass (a grazer's body - the only carrion a hunter can eat; fades as it rots)</span>
+    <span class="swatch"><span class="ring" style="border-color:var(--carrion-inedible);border-style:dotted"></span>hunter remains (crossed out: predators no longer live off their own dead, so this is scenery)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--migrant);border-style:dashed"></span>migrant (just arrived, carries remembered genes)</span>
   </div>
   <div id="memory"></div>
@@ -158,6 +160,7 @@
 const GRID = 40;
 const DAY_LENGTH_TICKS = 48;   // one full cycle per ~4 real hours at the 5-min simulate schedule - a deliberate choice for more visual variety per viewing session, not tied to a real calendar day
 const CARRION_DECAY = 40;      // must match CARRION_DECAY in rules/ecosystem.py - only used to fade a carcass out over its lifetime
+const SCAVENGEABLE_CARRION = ['grazer']; // must match SCAVENGEABLE_CARRION - whose bodies are actually food
 const MIGRANT_MARK_TICKS = 40; // how long a migrant keeps its arrival halo - viewer-only, nothing in the sim reads it
 const MAX_TRAIT = 3;           // upper bound of the genome traits in TRAIT_REGISTRY - used only to normalise them for drawing
 const HERD_RADIUS = 2;         // must match HERD_RADIUS in rules/ecosystem.py - who counts as standing together
@@ -180,6 +183,12 @@ function resize() {
 }
 window.addEventListener('resize', resize);
 resize();
+
+// Whether a carcass is food. Carcasses saved before bodies had a species are
+// treated as a grazer's, exactly as rules/ecosystem.py does on load.
+function edibleCarrion(k) {
+  return SCAVENGEABLE_CARRION.includes(k.species || 'grazer');
+}
 
 // Mirror of _panic_radius() in rules/ecosystem.py: how close a hunter has to
 // get before this grazer stops feeding and runs. Kept in sync by hand - it's
@@ -407,24 +416,41 @@ function draw(now) {
     ctx.fill();
   }
 
-  // carrion: hollow bone-coloured rings with a crossbar, drawn under the
-  // living so a scavenging hunter still reads clearly on top of one. Hollow
-  // and grey keeps them distinct from the filled amber resource diamonds -
-  // this is food only a hunter can use. They fade as they rot, so you can
-  // see which carcasses are nearly gone.
+  // carrion: hollow rings drawn under the living, so a scavenging hunter
+  // still reads clearly on top of one. A carcass now knows whose body it is,
+  // and that decides whether it is food at all (see SCAVENGEABLE_CARRION in
+  // rules/ecosystem.py), so the two kinds have to look different:
+  //   - a grazer's body is bone-grey with a crossbar - a meal, the only
+  //     carrion a hunter can eat, and hollow/grey to stay distinct from the
+  //     filled amber resource diamonds a grazer eats.
+  //   - a hunter's body is dark rust, dotted, and struck through with an X -
+  //     inedible. Predators no longer live off their own dead, so a field of
+  //     crossed rings is a field of hunters who starved with nothing left to
+  //     eat, which is exactly the signal that a grazer could safely return.
+  // Both fade as they rot, so you can see which are nearly gone.
   for (const k of world.carrion || []) {
     const cx = k.x * cell + cell / 2;
     const cy = k.y * cell + cell / 2;
     const life = Math.max(0, Math.min(1, 1 - (k.age || 0) / CARRION_DECAY));
-    ctx.globalAlpha = 0.18 + 0.62 * life;
-    ctx.strokeStyle = '#b9b2a4';
-    ctx.lineWidth = Math.max(1, cell * 0.07);
+    const food = edibleCarrion(k);
+    ctx.globalAlpha = food ? 0.18 + 0.62 * life : 0.12 + 0.38 * life;
+    ctx.strokeStyle = food ? '#b9b2a4' : '#7a544c';
+    ctx.lineWidth = Math.max(1, cell * (food ? 0.07 : 0.055));
+    if (!food) ctx.setLineDash([cell * 0.07, cell * 0.09]);
     ctx.beginPath();
     ctx.arc(cx, cy, cell * 0.2, 0, Math.PI * 2);
     ctx.stroke();
+    ctx.setLineDash([]);
     ctx.beginPath();
-    ctx.moveTo(cx - cell * 0.1, cy);
-    ctx.lineTo(cx + cell * 0.1, cy);
+    if (food) {
+      ctx.moveTo(cx - cell * 0.1, cy);
+      ctx.lineTo(cx + cell * 0.1, cy);
+    } else {
+      ctx.moveTo(cx - cell * 0.09, cy - cell * 0.09);
+      ctx.lineTo(cx + cell * 0.09, cy + cell * 0.09);
+      ctx.moveTo(cx + cell * 0.09, cy - cell * 0.09);
+      ctx.lineTo(cx - cell * 0.09, cy + cell * 0.09);
+    }
     ctx.stroke();
     ctx.globalAlpha = 1;
   }
@@ -615,6 +641,14 @@ function draw(now) {
   const hunterCount = creatures.filter(c => c.species === 'hunter').length;
   const herdedCount = creatures.filter(c => c.species !== 'hunter' && (c.herd_cover || 0) > 0).length;
 
+  // Carcasses split by whether a hunter can actually eat them. "carcasses" is
+  // the food supply - it only exists while there are grazers dying of
+  // something other than predation - and "hunter remains" is the tally of
+  // predators that starved, which is now a dead end rather than a meal.
+  const carrionList = world.carrion || [];
+  const edibleCount = carrionList.filter(edibleCarrion).length;
+  const remainsCount = carrionList.length - edibleCount;
+
   // Grazers that can currently see a hunter and are choosing to keep feeding
   // anyway - i.e. a predator inside sense_range but outside the flight ring.
   // This is the number the nerve gene exists to move: when it's above zero,
@@ -636,7 +670,8 @@ function draw(now) {
     `<span>in a herd <b>${herdedCount}</b></span>` +
     `<span>holding nerve <b>${nerveCount}</b></span>` +
     `<span>resources <b>${(world.resources || []).length}</b></span>` +
-    `<span>carcasses <b>${(world.carrion || []).length}</b></span>`;
+    `<span>carcasses <b>${edibleCount}</b></span>` +
+    `<span>hunter remains <b>${remainsCount}</b></span>`;
 
   const lineage = world.lineage || {};
   memoryEl.innerHTML =
