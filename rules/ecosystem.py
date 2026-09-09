@@ -35,6 +35,14 @@ which in a world this crowded with hunters is the difference between eating and
 starving; it is paid for in the risk of being caught. When it does run, it runs
 for the trees rather than in a straight line (see _move_away).
 
+Nothing about a body here is free. Speed costs energy every tick (MOVE_COST),
+a hunter's acuity costs energy every tick (ACUITY_COST), and as of this run so
+does the horizon itself (see FREE_SENSE_RANGE): eyes out to the species
+baseline are part of the animal, and every couple of tiles of sight beyond
+that is paid for forever, whether or not they ever find anything. An unpriced
+gene does not find an optimum - it only ratchets - and sense_range was the
+last one in this world that had no price at all.
+
 Anything that dies of starvation or old age leaves a Carrion behind: a static,
 rotting carcass. It is the only food a hunter can get without catching
 something that is actively fleeing it - but only a grazer's body counts. A
@@ -188,6 +196,41 @@ MOVE_COST = 1
 # no price can only ratchet upward, and this world already has one of those in
 # camouflage.
 ACUITY_COST = 1
+
+# The price of a horizon.
+#
+# sense_range was the last first-class gene in this world with no cost on it
+# at all, and by tick 3091 the grazers had drifted to an average sense_range
+# of 11 - more than double the species default. That is a 23x23 box, a third
+# of the entire map, and it is not the harmless "finds food better" upgrade it
+# looks like, because a grazer's flight distance IS its sense_range (see
+# _panic_radius). An animal that can see a third of the world panics at a
+# hunter a third of the world away, and at the speed 6 those same grazers had
+# drifted to it burns 6 energy every tick doing it - which is the exact
+# starvation-while-fleeing death spiral `nerve` was added at tick 1728 to
+# stop. Nerve could never stop it: nerve is capped at 3.0 and sense_range is
+# capped at nothing, so the counterweight was structurally unable to catch up
+# with the thing it was counterweighting. Third time this world has learned
+# the same lesson, after MOVE_COST and ACUITY_COST: an unpriced gene doesn't
+# find an optimum, it just ratchets.
+#
+# So eyes have upkeep now. The first FREE_SENSE_RANGE tiles of horizon are
+# part of the body and cost nothing - that is the species default plus one, so
+# nothing is being charged for the senses it was born with - and past that,
+# every SENSE_COST_STEP full tiles costs SENSE_COST energy per tick, forever,
+# whether or not they find anything. Integer division, so the charge steps up
+# in whole tiles instead of sliding: one point of drift is never immediately
+# expensive, and the price only really shows up in a lineage that has
+# committed to seeing a long way. Charged to both species, because unlike
+# acuity this is the one gene both of them actually read.
+#
+# It is meant as a soft ceiling, not a nerf. At sense_range 6 a creature pays
+# nothing at all; at 11, where the grazers actually are, it pays 2 a tick -
+# enough to be a real reason to come back down, not enough to be a death
+# sentence for the two animals currently holding this world open.
+FREE_SENSE_RANGE = 6
+SENSE_COST_STEP = 2
+SENSE_COST = 1
 
 MUTATION_RATE = 0.1                 # chance any given gene mutates on reproduction
 MAX_AGE = 400
@@ -513,6 +556,13 @@ class World:
             # above) - being fast is a real metabolic expense now, not a
             # stat with only upside.
             creature.energy -= MOVE_COST * creature.speed
+            # And every creature pays upkeep on its eyes, every tick, whether
+            # or not they found anything (see FREE_SENSE_RANGE). Charged to
+            # both species, unlike acuity: sense_range is the one gene a
+            # grazer and a hunter both actually read, so both are billed for
+            # it. A creature at or below the free allowance pays nothing and
+            # behaves exactly as it did before this existed.
+            creature.energy -= _vision_cost(creature)
             # And a hunter pays for its eyes every tick whether or not they
             # found anything (see ACUITY_COST). Charged only to hunters, since
             # a grazer's inherited acuity is inert - it should not be billed
@@ -725,6 +775,23 @@ def _spawn_creature(
     )
 
 
+def _vision_cost(creature: Creature) -> int:
+    """Energy per tick this creature pays simply for being able to see as far
+    as it does (see FREE_SENSE_RANGE). Whole tiles only: the first
+    FREE_SENSE_RANGE tiles of horizon are part of the body and free, and past
+    that the charge steps up once every SENSE_COST_STEP tiles rather than
+    sliding - so a single point of drift is never immediately expensive, and
+    the bill only really lands on a lineage that has committed to seeing a
+    long way. Not a gene of its own and not stored on the creature: it is
+    derived from sense_range every tick, so the save format is untouched and
+    a creature at or below the allowance is charged nothing at all.
+    """
+    excess = creature.sense_range - FREE_SENSE_RANGE
+    if excess <= 0:
+        return 0
+    return int(SENSE_COST * (excess // SENSE_COST_STEP))
+
+
 def _update_herd_cover(grazers: list[Creature]) -> None:
     """Recompute every grazer's herd cover from how many other grazers are
     within HERD_RADIUS tiles. Not a gene and not inherited - it's a fact
@@ -748,6 +815,11 @@ def _panic_radius(grazer: Creature) -> float:
     worked - and shrinks by the nerve gene, amplified while the animal is
     hungry enough that a missed meal is its own kind of death. Never below
     one tile: nerve buys patience, not suicide.
+
+    This is also why sense_range is not a free stat any more (see
+    FREE_SENSE_RANGE): every tile of extra horizon is another tile of ground
+    the animal insists on keeping clear of predators, and nerve tops out at
+    3.0 while sense_range tops out at nothing.
     """
     nerve = grazer.trait("nerve")
     if grazer.energy < NERVE_HUNGER_LEVEL:

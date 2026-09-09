@@ -17,6 +17,7 @@
     --carrion-inedible: #7a544c;
     --migrant: #c9b6ff;
     --canopy: rgba(159, 255, 196, 0.42);
+    --vision: #8fc8ff;
     --text: #cfe8d6;
     --muted: #5c7266;
   }
@@ -151,7 +152,8 @@
   <div id="legend">
     <span class="swatch"><span class="dot" style="background:var(--creature-high)"></span>grazer (brighter = more energy, fainter = more camouflage or deeper in cover)</span>
     <span class="swatch"><span class="speck"></span>canopy (forest: the only ground that hides a grazer from hunters - and almost nothing grows under it)</span>
-    <span class="swatch"><span class="ring" style="border-color:var(--creature-high)"></span>flight distance (the bubble a grazer keeps clear of hunters - nerve shrinks it, so a small ring is an animal that keeps eating with a predator in sight)</span>
+    <span class="swatch"><span class="ring" style="border-color:var(--vision);border-style:dashed"></span>perception (how far this animal can actually see - free out to 6 tiles, then one spoke on the ring for every energy/tick it burns keeping the extra horizon)</span>
+    <span class="swatch"><span class="ring" style="border-color:var(--creature-high)"></span>flight distance (the bubble a grazer keeps clear of hunters - nerve shrinks it, so the gap in from the blue perception ring is exactly how much nerve this animal has)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--resource);border-style:dashed"></span>hungry nerve (amber: this grazer is starving and letting hunters come closer than it otherwise would)</span>
     <span class="swatch"><span class="bar" style="background:var(--creature-high)"></span>herd bond (linked grazers are harder for a hunter to single out - brighter = deeper cover)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--creature-high);border-style:dotted"></span>gregariousness (how strongly a grazer walks to company instead of food)</span>
@@ -179,6 +181,10 @@ const NERVE_HUNGER_LEVEL = 25; // must match NERVE_HUNGER_LEVEL in rules/ecosyst
 const NERVE_HUNGER_BOOST = 1.5;// must match NERVE_HUNGER_BOOST
 const TERRAIN_COVER = { f: 1.5, g: 0, s: 0, w: 0 }; // must match TERRAIN_COVER - how much a tile hides a grazer
 const MAX_COVER = 1.5;         // the largest value in TERRAIN_COVER, for normalising
+const FREE_SENSE_RANGE = 6;    // must match FREE_SENSE_RANGE in rules/ecosystem.py - horizon that costs nothing
+const SENSE_COST_STEP = 2;     // must match SENSE_COST_STEP - tiles of extra horizon per energy/tick
+const SENSE_COST = 1;          // must match SENSE_COST - energy/tick per step of extra horizon
+const MAX_VISION_COST = 4;     // only used to normalise the perception ring's brightness
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 const stats = document.getElementById('stats');
@@ -220,6 +226,15 @@ function panicRadius(c) {
   let nerve = (c.traits && c.traits.nerve) || 0;
   if ((c.energy ?? 0) < NERVE_HUNGER_LEVEL) nerve *= NERVE_HUNGER_BOOST;
   return Math.max(1, (c.sense_range || 0) - nerve);
+}
+
+// Mirror of _vision_cost() in rules/ecosystem.py: the energy this creature
+// burns every tick just for being able to see as far as it does. Derived from
+// sense_range rather than stored, same as the panic radius above.
+function visionCost(c) {
+  const excess = (c.sense_range || 0) - FREE_SENSE_RANGE;
+  if (excess <= 0) return 0;
+  return SENSE_COST * Math.floor(excess / SENSE_COST_STEP);
 }
 
 function lerpColor(a, b, t) {
@@ -512,14 +527,64 @@ function draw(now) {
 
   const creatures = interpolatedCreatures(now);
 
+  // perception: the ring at a creature's actual sense_range - everything it
+  // can see, prey, predators, food and bodies alike. Drawn for both species
+  // in cool blue so it never reads as one of the green prey-side or orange
+  // predator-side markings, and drawn OUTSIDE the green flight bubble below,
+  // because that is the relationship worth seeing: the outer ring is what the
+  // animal perceives, the inner one is what it will actually run from, and
+  // the gap between them is its nerve.
+  //
+  // As of this run the ring is also a bill. Sight beyond FREE_SENSE_RANGE
+  // costs energy every single tick (see _vision_cost in rules/ecosystem.py),
+  // so the ring brightens and thickens with what it costs, and carries one
+  // short radial spoke for every energy/tick the animal is paying. A creature
+  // living inside the free allowance has a bare, almost invisible ring; a
+  // grazer that has drifted out to sense_range 11 wears a wide spoked ring
+  // and is paying for every tile of it whether or not it ever finds anything
+  // out there.
+  for (const c of creatures) {
+    const range = c.sense_range || 0;
+    if (range <= 0) continue;
+    const cost = visionCost(c);
+    const paid = Math.max(0, Math.min(1, cost / MAX_VISION_COST));
+    const cx = c.drawX * cell + cell / 2;
+    const cy = c.drawY * cell + cell / 2;
+
+    ctx.strokeStyle = '#8fc8ff';
+    ctx.lineWidth = Math.max(0.5, cell * (0.016 + 0.024 * paid));
+    ctx.globalAlpha = c.alpha * (0.06 + 0.20 * paid);
+    ctx.setLineDash([cell * 0.45, cell * 0.55]);
+    ctx.beginPath();
+    ctx.arc(cx, cy, range * cell, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    if (cost > 0) {
+      ctx.globalAlpha = c.alpha * 0.45;
+      ctx.lineWidth = Math.max(0.8, cell * 0.04);
+      for (let i = 0; i < cost; i++) {
+        const a = -Math.PI / 2 + (i * 2 * Math.PI) / cost;
+        const r0 = Math.max(0, (range - 0.45) * cell);
+        const r1 = (range + 0.45) * cell;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
+        ctx.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
   // flight distance: the bubble of ground a grazer insists on keeping clear
   // of hunters (see _panic_radius in rules/ecosystem.py). A grazer sees a
-  // predator out to its full sense_range, but only bolts once one crosses
-  // this ring - so the ring is the single most important invisible number in
-  // the world made visible. A wide ring is a jumpy animal that spends its
-  // life running and starves doing it; a tight ring is one holding its nerve
-  // over a meal. The ring turns amber and dashed when hunger is what's
-  // shrinking it, because a starving grazer takes risks a fed one wouldn't.
+  // predator out to its full sense_range - the blue ring above - but only
+  // bolts once one crosses this one, so the two together are the single most
+  // important invisible number in the world made visible. A wide ring is a
+  // jumpy animal that spends its life running and starves doing it; a tight
+  // ring is one holding its nerve over a meal. The ring turns amber and
+  // dashed when hunger is what's shrinking it, because a starving grazer
+  // takes risks a fed one wouldn't.
   for (const c of creatures) {
     if (c.species === 'hunter') continue;
     const radius = panicRadius(c);
@@ -710,6 +775,13 @@ function draw(now) {
     c => c.species !== 'hunter' && coverAt(world.terrain, c.x, c.y) > 0
   ).length;
 
+  // What the population is spending, per tick, just on being able to see far
+  // (see FREE_SENSE_RANGE in rules/ecosystem.py). This is the number the
+  // price of perception exists to move: sense_range used to be free and had
+  // drifted to an average of 11, so if this total falls over the coming
+  // hundreds of ticks while the population holds, the ceiling is working.
+  const visionUpkeep = creatures.reduce((sum, c) => sum + visionCost(c), 0);
+
   // Carcasses split by whether a hunter can actually eat them. "carcasses" is
   // the food supply - it only exists while there are grazers dying of
   // something other than predation - and "hunter remains" is the tally of
@@ -739,6 +811,7 @@ function draw(now) {
     `<span>in a herd <b>${herdedCount}</b></span>` +
     `<span>under canopy <b>${shelteredCount}</b></span>` +
     `<span>holding nerve <b>${nerveCount}</b></span>` +
+    `<span>vision upkeep <b>${visionUpkeep}</b>/tick</span>` +
     `<span>resources <b>${(world.resources || []).length}</b></span>` +
     `<span>carcasses <b>${edibleCount}</b></span>` +
     `<span>hunter remains <b>${remainsCount}</b></span>`;
