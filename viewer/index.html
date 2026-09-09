@@ -16,6 +16,7 @@
     --carrion: #b9b2a4;
     --carrion-inedible: #7a544c;
     --migrant: #c9b6ff;
+    --brood: #f2a6d0;
     --canopy: rgba(159, 255, 196, 0.42);
     --vision: #8fc8ff;
     --text: #cfe8d6;
@@ -84,6 +85,11 @@
       radial-gradient(circle at 70% 40%, var(--canopy) 0 1.2px, transparent 1.3px),
       radial-gradient(circle at 40% 80%, var(--canopy) 0 1.2px, transparent 1.3px),
       #12200e;
+  }
+  .core {
+    width: 9px; height: 9px; display: inline-block; border-radius: 50%;
+    background:
+      radial-gradient(circle at 50% 50%, var(--brood) 0 2.4px, var(--creature-high) 2.5px);
   }
   .tri {
     width: 0; height: 0; display: inline-block;
@@ -157,6 +163,7 @@
     <span class="swatch"><span class="ring" style="border-color:var(--resource);border-style:dashed"></span>hungry nerve (amber: this grazer is starving and letting hunters come closer than it otherwise would)</span>
     <span class="swatch"><span class="bar" style="background:var(--creature-high)"></span>herd bond (linked grazers are harder for a hunter to single out - brighter = deeper cover)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--creature-high);border-style:dotted"></span>gregariousness (how strongly a grazer walks to company instead of food)</span>
+    <span class="swatch"><span class="core"></span>provisioning (the rose core, on either species: how much of itself this animal pours into each newborn instead of its own survival - no energy is created, it only moves down a generation)</span>
     <span class="swatch"><span class="tri" style="border-bottom-color:var(--hunter-high)"></span>hunter (brighter = more energy)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--hunter-high)"></span>acuity (rings around a hunter - sees through camouflage, herds and canopy, costs energy every tick)</span>
     <span class="swatch"><span class="dot" style="background:var(--resource)"></span>resource (grows where light reaches the ground, so it clusters in the open)</span>
@@ -185,6 +192,7 @@ const FREE_SENSE_RANGE = 6;    // must match FREE_SENSE_RANGE in rules/ecosystem
 const SENSE_COST_STEP = 2;     // must match SENSE_COST_STEP - tiles of extra horizon per energy/tick
 const SENSE_COST = 1;          // must match SENSE_COST - energy/tick per step of extra horizon
 const MAX_VISION_COST = 4;     // only used to normalise the perception ring's brightness
+const PROVISION_ENERGY = 6;    // must match PROVISION_ENERGY in rules/ecosystem.py - energy a parent hands a newborn per point of provisioning
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 const stats = document.getElementById('stats');
@@ -235,6 +243,15 @@ function visionCost(c) {
   const excess = (c.sense_range || 0) - FREE_SENSE_RANGE;
   if (excess <= 0) return 0;
   return SENSE_COST * Math.floor(excess / SENSE_COST_STEP);
+}
+
+// Mirror of _provision() in rules/ecosystem.py, minus the parent's affordability
+// clamp: the energy this animal would hand to a newborn on top of the standard
+// endowment. Zero for anything carrying provisioning 0, which is every creature
+// this world has ever had until now.
+function broodStake(c) {
+  const invest = (c.traits && c.traits.provisioning) || 0;
+  return invest <= 0 ? 0 : Math.floor(PROVISION_ENERGY * invest);
 }
 
 function lerpColor(a, b, t) {
@@ -452,7 +469,8 @@ async function fetchLatestLore() {
 // species is currently extinct, the only trace of it left in the world.
 // Each species is shown with the genes it actually uses: concealment
 // (camouflage), sociability (gregariousness) and composure (nerve) for
-// grazers, acuity for hunters.
+// grazers, acuity for hunters - plus brood investment (provisioning), which
+// is the one gene both of them read.
 function bloodline(records, genes) {
   if (!records || !records.length) return 'nothing remembered';
   const avg = key => records.reduce((sum, g) => sum + (g[key] || 0), 0) / records.length;
@@ -760,6 +778,30 @@ function draw(now) {
     ctx.globalAlpha = 1;
   }
 
+  // provisioning: the rose core, drawn last so it sits inside the body of
+  // whichever species is carrying it. Every other gene in this world is about
+  // seeing or running; this one decides how much of a parent's own energy is
+  // handed to each newborn instead of kept to survive and breed again (see
+  // PROVISION_ENERGY in rules/ecosystem.py), and both species read it, so it
+  // is the only marking here that appears on a triangle and a circle alike.
+  // It creates nothing: watch for a bright, fat newborn appearing beside a
+  // parent that has gone suddenly dark, because the existing energy ramp is
+  // already drawing both halves of that transfer.
+  for (const c of creatures) {
+    const invest = Math.max(0, Math.min(1, ((c.traits && c.traits.provisioning) || 0) / MAX_TRAIT));
+    if (invest <= 0) continue;
+    const cx = c.drawX * cell + cell / 2;
+    // the triangle's mass sits below its apex, so nudge the hunter's core
+    // down to stay inside the silhouette rather than riding on its point.
+    const cy = c.drawY * cell + cell / 2 + (c.species === 'hunter' ? cell * 0.09 : 0);
+    ctx.globalAlpha = c.alpha * (0.45 + 0.45 * invest);
+    ctx.fillStyle = '#f2a6d0';
+    ctx.beginPath();
+    ctx.arc(cx, cy, cell * (0.05 + 0.08 * invest), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
   drawDayNight(world.tick);
   drawFog(now);
 
@@ -781,6 +823,15 @@ function draw(now) {
   // drifted to an average of 11, so if this total falls over the coming
   // hundreds of ticks while the population holds, the ceiling is working.
   const visionUpkeep = creatures.reduce((sum, c) => sum + visionCost(c), 0);
+
+  // The average head start a newborn is being handed here, on top of the flat
+  // endowment every child in this world has always got (see PROVISION_ENERGY).
+  // This is the number provisioning exists to move: at 0, every newborn grazer
+  // starts on 20 energy and burns most of it inside two ticks, which is why a
+  // population sitting on twenty uneaten resources never grew past five.
+  const broodAvg = creatures.length
+    ? creatures.reduce((sum, c) => sum + broodStake(c), 0) / creatures.length
+    : 0;
 
   // Carcasses split by whether a hunter can actually eat them. "carcasses" is
   // the food supply - it only exists while there are grazers dying of
@@ -812,6 +863,7 @@ function draw(now) {
     `<span>under canopy <b>${shelteredCount}</b></span>` +
     `<span>holding nerve <b>${nerveCount}</b></span>` +
     `<span>vision upkeep <b>${visionUpkeep}</b>/tick</span>` +
+    `<span>brood stake <b>${broodAvg.toFixed(1)}</b></span>` +
     `<span>resources <b>${(world.resources || []).length}</b></span>` +
     `<span>carcasses <b>${edibleCount}</b></span>` +
     `<span>hunter remains <b>${remainsCount}</b></span>`;
@@ -819,8 +871,8 @@ function draw(now) {
   const lineage = world.lineage || {};
   memoryEl.innerHTML =
     `<span>remembered bloodline (what the next migrant inherits)</span>` +
-    `<span>grazer <b>${bloodline(lineage.grazer, [['camouflage', 'camo'], ['gregariousness', 'herd'], ['nerve', 'nerve']])}</b></span>` +
-    `<span>hunter <b>${bloodline(lineage.hunter, [['acuity', 'acuity']])}</b></span>`;
+    `<span>grazer <b>${bloodline(lineage.grazer, [['camouflage', 'camo'], ['gregariousness', 'herd'], ['nerve', 'nerve'], ['provisioning', 'brood']])}</b></span>` +
+    `<span>hunter <b>${bloodline(lineage.hunter, [['acuity', 'acuity'], ['provisioning', 'brood']])}</b></span>`;
 }
 
 fetchWorld();

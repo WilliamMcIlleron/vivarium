@@ -63,7 +63,7 @@ class ClaudeCodeCLIBackend(Backend):
             input=prompt,
             capture_output=True,
             text=True,
-            timeout=600,
+            timeout=1000,
         )
         if result.returncode != 0:
             message = result.stderr.strip() or result.stdout.strip()

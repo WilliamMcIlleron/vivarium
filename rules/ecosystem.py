@@ -43,6 +43,14 @@ that is paid for forever, whether or not they ever find anything. An unpriced
 gene does not find an optimum - it only ratchets - and sense_range was the
 last one in this world that had no price at all.
 
+Bodies are not the only thing a genome decides here. `provisioning` is this
+world's first life-history gene: it sets how much of a parent's own energy
+goes into each newborn instead of into staying alive to breed again (see
+PROVISION_ENERGY). It creates nothing - every point the child starts with is a
+point the parent no longer has - and it is the only gene in the registry that
+both species read for the same reason, because "many cheap offspring or few
+expensive ones" is a question a predator faces exactly as squarely as its prey.
+
 Anything that dies of starvation or old age leaves a Carrion behind: a static,
 rotting carcass. It is the only food a hunter can get without catching
 something that is actively fleeing it - but only a grazer's body counts. A
@@ -243,6 +251,38 @@ REPRODUCE = {
     "hunter": {"threshold": 110, "cost": 55},
 }
 
+# Parental provisioning: extra energy a parent hands to its newborn, on top of
+# the standard `cost // 2` endowment, per point of the `provisioning` gene.
+#
+# Tick 3240 is the argument for this. The world holds 3 grazers, 2 hunters and
+# twenty uneaten resources lying on the ground - food is not what is missing.
+# What is missing is children that live long enough to walk to one. Grazers
+# have drifted to speed 5.67 and sense_range 12, which is about 5 energy a
+# tick of movement plus 3 of vision upkeep: roughly 9 a tick, every tick, for
+# an animal that starts life with `cost // 2` = 20 energy. That is a two-tick
+# lifespan for a newborn on a 1600-tile grid. The adults are superbly equipped
+# and their offspring are born starving, which is why a population sitting on
+# a full larder has not grown past five animals in a thousand ticks.
+#
+# Every gene in this world so far has been about detection or movement - what
+# an animal can see, what can see it, how fast it runs. None of them touches
+# the one decision every real organism has to make: many cheap offspring or
+# few expensive ones. `provisioning` is that decision, and nothing else in the
+# tick has to change for it to matter.
+#
+# The property that makes it safe: it creates no energy. Every point the child
+# starts with is a point the parent no longer has, so the ecosystem's total
+# budget is exactly what it was - this only moves energy along the life cycle,
+# from an animal that has already proved it can feed itself to one that hasn't.
+# And it can only be afforded by a fat parent: a grazer breeding at exactly its
+# threshold of 60 has 20 left after the cost, so maximum generosity leaves it
+# with 2 and almost certainly dead before its next meal. A parent never pays
+# itself below 1 energy (see _provision), so the gene buys a child's head start
+# out of the parent's future, never out of an instant suicide. Whether this
+# world chooses a few well-stocked young or a great many doomed ones is the
+# entire point of adding it.
+PROVISION_ENERGY = 6
+
 # If either species dies out entirely, a small per-tick chance of one
 # migrating back in. Without this, grazer extinction was a PERMANENT dead
 # world: hunters only eat grazers, never resources, so a wiped-out grazer
@@ -320,14 +360,20 @@ FERTILITY_ATTEMPTS = 12   # rejection-sampling tries before a resource lands any
 # perception - a nervy grazer sees the predator perfectly well and keeps
 # eating anyway - and its price is the shorter head start it leaves itself.
 #
-# None of the four is species-scoped - the registry has no concept of
-# "grazer-only", so each species carries the other's genes inertly, since
-# nothing on that side ever reads them.
+# provisioning: how much of its own remaining energy a parent pours into each
+# newborn instead of keeping it to survive and breed again (see
+# PROVISION_ENERGY). The first four genes above are all about detection or
+# movement, and all four are one-sided - each species carries the other's
+# inertly. This one is neither: it is a life-history trait, it moves no
+# energy into or out of the world, and BOTH species read it, because "many
+# cheap offspring or few expensive ones" is a question a predator faces
+# exactly as squarely as its prey.
 TRAIT_REGISTRY: dict[str, tuple[float, float, float, float]] = {
     "camouflage": (0.0, 0.5, 0.0, 3.0),
     "acuity": (0.0, 0.5, 0.0, 3.0),
     "gregariousness": (0.0, 0.5, 0.0, 3.0),
     "nerve": (0.0, 0.5, 0.0, 3.0),
+    "provisioning": (0.0, 0.5, 0.0, 3.0),
 }
 
 
@@ -621,7 +667,17 @@ class World:
             repro = REPRODUCE[creature.species]
             if creature.energy >= repro["threshold"]:
                 creature.energy -= repro["cost"]
-                newborns.append(_reproduce(creature))
+                # Life history: on top of the flat cost of breeding, the
+                # parent decides how much of what's left it hands straight to
+                # the newborn (see PROVISION_ENERGY). Nothing is created here
+                # - every point the child starts with is a point the parent
+                # is now short, and it comes out of the parent's own chances
+                # of surviving to breed again. At provisioning 0, which is
+                # what every creature in this world carries today, the gift is
+                # zero and this tick is bit-for-bit what it always was.
+                gift = _provision(creature)
+                creature.energy -= gift
+                newborns.append(_reproduce(creature, gift))
                 # Breeding is the only thing that writes to the world's
                 # genetic memory - reaching the threshold is the world's own
                 # definition of a genome that works here.
@@ -790,6 +846,24 @@ def _vision_cost(creature: Creature) -> int:
     if excess <= 0:
         return 0
     return int(SENSE_COST * (excess // SENSE_COST_STEP))
+
+
+def _provision(parent: Creature) -> int:
+    """Energy this parent hands to its newborn on top of the standard
+    `cost // 2` endowment (see PROVISION_ENERGY). Whole points only, and never
+    more than the parent can give while still ending the tick alive: a
+    generous animal buys its child a head start out of its own future, not out
+    of an immediate suicide, so the cause of death here is always the ordinary
+    metabolic one a tick or two later.
+
+    At provisioning 0 - which is what every creature currently alive in this
+    world carries, and what every creature in tests/ carries - this is exactly
+    zero and reproduction behaves bit-for-bit as it always has.
+    """
+    invest = parent.trait("provisioning")
+    if invest <= 0:
+        return 0
+    return max(0, min(int(PROVISION_ENERGY * invest), parent.energy - 1))
 
 
 def _update_herd_cover(grazers: list[Creature]) -> None:
@@ -1063,7 +1137,12 @@ def _mutated_genes(
     return speed, sense_range, new_traits
 
 
-def _reproduce(parent: Creature) -> Creature:
+def _reproduce(parent: Creature, gift: int = 0) -> Creature:
+    """One offspring of `parent`, with a mutated copy of its genome and the
+    standard `cost // 2` endowment plus whatever the parent chose to hand over
+    (see _provision). `gift` defaults to 0, so calling this with a parent
+    alone - as tests/ does - produces exactly the newborn it always did.
+    """
     speed, sense_range, new_traits = _mutated_genes(
         parent.speed, parent.sense_range, parent.traits
     )
@@ -1073,7 +1152,7 @@ def _reproduce(parent: Creature) -> Creature:
         id=str(uuid.uuid4()),
         x=parent.x,
         y=parent.y,
-        energy=cost // 2,
+        energy=cost // 2 + gift,
         speed=speed,
         sense_range=sense_range,
         species=parent.species,

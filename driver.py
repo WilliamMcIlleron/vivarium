@@ -93,7 +93,7 @@ def _make_logger(name: str) -> logging.Logger:
 # allowlist (only these paths may change at all). Both are checked - a path
 # has to pass the allowlist AND not match the denylist.
 ALLOWED_PREFIXES = ("rules/", "viewer/")
-ALLOWED_EXACT = ("state/goals.md",)
+ALLOWED_EXACT = ("state/goals.md", "state/scratchpad.md")
 
 
 # ---------------------------------------------------------------- simulate --
