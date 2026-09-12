@@ -181,6 +181,7 @@
     <span class="swatch"><span class="ring" style="border-color:var(--carrion)"></span>carcass (a grazer's body - the only carrion a hunter can eat; fades as it rots)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--carrion-inedible);border-style:dotted"></span>hunter remains (crossed out: predators no longer live off their own dead, so this is scenery)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--migrant);border-style:dashed"></span>migrant (just arrived, carries remembered genes)</span>
+    <span class="swatch"><span class="ring" style="border-color:var(--migrant);border-style:dotted"></span>the door (pulsing violet, with the absent species' own shape hollow inside it: where the next migrant of a species that has died out here would choose to come in - a grazer wants ground outside every hunter's menace radius and near something to eat, a hunter wants ground about a sense_range from the nearest prey. A real migrant only glances at two dozen tiles, so it lands near here rather than exactly here.)</span>
   </div>
   <div id="memory"></div>
   <div id="latest-evolve"></div>
@@ -213,6 +214,8 @@ const HUNT_FLESH = 12;         // must match HUNT_FLESH - what a body is worth w
 const HUNT_EFFICIENCY = 0.7;   // must match HUNT_EFFICIENCY - the share of a meal a predator actually banks
 const HUNT_MAX_ENERGY = 70;    // must match HUNT_MAX_ENERGY - ceiling on a single sitting
 const MAX_MENACE_SPEED = 6;    // only used to normalise how loudly a hunter's menace ring is drawn
+const ARRIVAL_CANDIDATES = 24;   // must match ARRIVAL_CANDIDATES - how many tiles a real migrant actually looks at (the viewer looks at all 1600, so it draws the ideal door and the sim lands near it)
+const ARRIVAL_SAFE_MARGIN = 6;   // must match ARRIVAL_SAFE_MARGIN - clearance past which one safe tile is as good as another
 const MOVE_COST = 1;           // must match MOVE_COST in rules/ecosystem.py - energy/tick per point of speed
 const ACUITY_COST = 1;         // must match ACUITY_COST - energy/tick per full point of a hunter's acuity
 const BIRTH_RUNWAY_TICKS = 4;  // must match BIRTH_RUNWAY_TICKS - ticks of its own upkeep a newborn starts with
@@ -321,6 +324,77 @@ function flightReference(c, creatures) {
   if (worst) return { threat: worst, seen: true };
   const fastest = hunters.reduce((a, b) => ((a.speed || 0) >= (b.speed || 0) ? a : b));
   return { threat: fastest, seen: false };
+}
+
+// Mirrors of _wrapped_delta/_torus_distance/_menace_radius in
+// rules/ecosystem.py. Arrival is the one decision in this world measured
+// across the whole map at once, so it is the one place the wrapping seam is
+// counted as the short way round rather than ignored.
+function wrappedDelta(a, b) {
+  const d = Math.abs(a - b) % GRID;
+  return Math.min(d, GRID - d);
+}
+
+function torusDistance(ax, ay, bx, by) {
+  return Math.max(wrappedDelta(ax, bx), wrappedDelta(ay, by));
+}
+
+function menaceRadius(h) {
+  return Math.max(1, h.speed || 0) * FLIGHT_WARNING_TICKS;
+}
+
+// "The door": for each species, the best tile the world currently offers
+// something of that species walking in from outside (see _arrival_key in
+// rules/ecosystem.py), plus how much of the grid is safe ground at all. The
+// sim samples ARRIVAL_CANDIDATES tiles and takes the best of those; this scans
+// every tile, so what it marks is the ideal a real migrant lands near rather
+// than the exact tile it will use. Computed once per tick and cached - the
+// canvas redraws sixty times a tick and this is a 1600-tile sweep.
+let arrivalCache = { tick: null, safeFraction: 0, doors: {} };
+
+function arrivalField(world) {
+  if (arrivalCache.tick === world.tick) return arrivalCache;
+  const creatures = world.creatures || [];
+  const hunters = creatures.filter(c => c.species === 'hunter');
+  const grazers = creatures.filter(c => c.species !== 'hunter');
+  const resources = world.resources || [];
+  // the next hunter to arrive is a draw from the remembered bloodline, so its
+  // preferred hunting distance is that stock's average horizon.
+  const remembered = (world.lineage && world.lineage.hunter) || [];
+  const hunterSense = remembered.length
+    ? Math.max(1, Math.round(
+        remembered.reduce((s, g) => s + (g.sense_range || 0), 0) / remembered.length))
+    : 5;
+  let safeTiles = 0;
+  let grazerDoor = null, grazerKey = -Infinity;
+  let hunterDoor = null, hunterKey = -Infinity;
+  for (let y = 0; y < GRID; y++) {
+    for (let x = 0; x < GRID; x++) {
+      let clearance = GRID;
+      for (const h of hunters) {
+        clearance = Math.min(clearance, torusDistance(x, y, h.x, h.y) - menaceRadius(h));
+      }
+      if (clearance > 0) safeTiles++;
+      let food = GRID;
+      for (const r of resources) food = Math.min(food, torusDistance(x, y, r.x, r.y));
+      // safety first, food only as a tie-break - the same ordered pair the sim
+      // compares as a tuple.
+      const gk = Math.min(ARRIVAL_SAFE_MARGIN, clearance) * 1000 - food;
+      if (gk > grazerKey) { grazerKey = gk; grazerDoor = { x, y }; }
+      if (grazers.length) {
+        let prey = GRID;
+        for (const g of grazers) prey = Math.min(prey, torusDistance(x, y, g.x, g.y));
+        const hk = -Math.abs(prey - hunterSense);
+        if (hk > hunterKey) { hunterKey = hk; hunterDoor = { x, y }; }
+      }
+    }
+  }
+  arrivalCache = {
+    tick: world.tick,
+    safeFraction: safeTiles / (GRID * GRID),
+    doors: { grazer: grazerDoor, hunter: hunterDoor },
+  };
+  return arrivalCache;
 }
 
 // Mirror of _vision_cost() in rules/ecosystem.py: the energy this creature
@@ -672,6 +746,51 @@ function draw(now) {
       ctx.lineTo(cx + cell * 0.09, cy + cell * 0.09);
       ctx.moveTo(cx + cell * 0.09, cy - cell * 0.09);
       ctx.lineTo(cx - cell * 0.09, cy + cell * 0.09);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  // the door: where the next migrant of an ABSENT species would come in.
+  // Arrival used to be a uniformly random tile, which is how a grazer that had
+  // just been wiped out kept reappearing inside the menace radius of the
+  // hunters that wiped it out; it is a choice now (see _arrival_site in
+  // rules/ecosystem.py), so it is worth seeing. Drawn only for a species with
+  // nothing of its own left alive here, as a pulsing violet gate - the same
+  // violet the migrant halo uses, because this is where that halo will next
+  // appear - with the species' own shape hollow inside it: a circle for a
+  // grazer, a triangle for a hunter. With grazers extinct and hunters standing
+  // on the grid, this marker is the only hopeful thing on screen: the patch of
+  // ground the world is keeping open.
+  const arrival = arrivalField(world);
+  const doorPulse = 0.5 + 0.5 * Math.sin(now / 700);
+  for (const species of ['grazer', 'hunter']) {
+    const door = arrival.doors[species];
+    if (!door) continue;
+    const present = (world.creatures || []).some(c =>
+      species === 'hunter' ? c.species === 'hunter' : c.species !== 'hunter');
+    if (present) continue;
+    const cx = door.x * cell + cell / 2;
+    const cy = door.y * cell + cell / 2;
+    ctx.strokeStyle = '#c9b6ff';
+    ctx.globalAlpha = 0.20 + 0.30 * doorPulse;
+    ctx.lineWidth = Math.max(0.8, cell * 0.05);
+    ctx.setLineDash([cell * 0.16, cell * 0.20]);
+    ctx.beginPath();
+    ctx.arc(cx, cy, cell * (0.52 + 0.26 * doorPulse), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 0.45 + 0.30 * doorPulse;
+    ctx.lineWidth = Math.max(0.6, cell * 0.04);
+    ctx.beginPath();
+    if (species === 'hunter') {
+      const r = cell * 0.22;
+      ctx.moveTo(cx, cy - r);
+      ctx.lineTo(cx + r * 0.87, cy + r * 0.5);
+      ctx.lineTo(cx - r * 0.87, cy + r * 0.5);
+      ctx.closePath();
+    } else {
+      ctx.arc(cx, cy, cell * 0.18, 0, Math.PI * 2);
     }
     ctx.stroke();
     ctx.globalAlpha = 1;
@@ -1147,6 +1266,7 @@ function draw(now) {
     `<span>resources <b>${(world.resources || []).length}</b></span>` +
     `<span>larder <b>${larder}</b></span>` +
     `<span>prey on the hoof <b>${onTheHoof}</b></span>` +
+    `<span>safe ground <b>${(arrival.safeFraction * 100).toFixed(0)}%</b></span>` +
     `<span>carcasses <b>${edibleCount}</b></span>` +
     `<span>hunter remains <b>${remainsCount}</b></span>`;
 

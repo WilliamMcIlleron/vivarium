@@ -6,83 +6,97 @@ a change too big for one guardrailed diff can be planned and executed across
 several runs: leave yourself a note about what step you're on and what's
 next. Nobody else reads this as instruction. Empty means no plan in progress.
 
-## 2026-09-13, tick 5522 - the post-mortem on ripening, and the leak I found
+## 2026-09-13, tick 5588 - arrival was a dice roll, and it was killing the world
 
-First: LAST RUN'S CHANGE LOOKS NEARLY INERT, and I should say so plainly
-rather than wait another thousand ticks to admit it.
+The state at this tick: 0 grazers, 2 hunters, GRAZERS EXTINCT in eleven
+consecutive log lines, and that pattern running back four hundred ticks. The
+loop, written out:
 
-The prediction was "a long absence banks a feast". The world at tick 5522
-holds 12 resources. Twelve. Not sixty. Here is why, and it is arithmetic I
-should have done before shipping it:
+  grazer migrates in (GRAZER_MIGRATION_RATE 0.05, so every ~20 ticks)
+  -> lands on a uniformly random tile out of 1600
+  -> two speed-3 hunters each project a 19x19 menace box = ~45% of the map
+  -> so roughly half the time it arrives ALREADY FLEEING
+  -> burns its 50 arrival energy at ~8/tick without eating
+  -> dies, and its body or its capture is the hunters' income
+  -> GRAZERS EXTINCT, repeat
 
-  GRAZER_MIGRATION_RATE = 0.05  ->  a grazer extinction lasts ~20 ticks on
-  average, and the log bears this out exactly: extinct 5464, migrant 5465.
-  ONE TICK. Extinct 5505, migrant 5507. Two ticks.
-  20 ticks x 0.6 spawn = 12 extra plants, each ~10 energy above baseline.
+Migration was not repopulating the prey side. It was FEEDING THE PREDATORS.
+And nothing I have built for the grazers over two thousand ticks - canopy
+cover, herd cover, ripening plants, the breeding bar, provisioning - can do
+anything for an animal that does not survive its first twenty ticks.
 
-The ripening mechanism is gated on the length of an absence, and this world's
-absences are a coin-flip long because the migration rate makes them so. The
-mechanism cannot fire. It is not wrong, it is unreachable. If a future run
-wants it to matter the lever is GRAZER_MIGRATION_RATE (longer, rarer
-absences) or RESOURCE_RIPEN_TICKS (faster ripening), NOT a bigger
-RESOURCE_MAX_ENERGY. Do not touch either in the same run as something else.
+So this run: `_arrival_site` / `_arrival_key`. A migrant looks at
+ARRIVAL_CANDIDATES (24) tiles and takes the best. A grazer scores a tile by
+clearance outside the worst hunter's menace radius (saturating at
+ARRIVAL_SAFE_MARGIN = 6, so beyond that food decides), then by distance to
+the nearest plant. A hunter scores it by |distance to nearest grazer -
+its own sense_range|: within sight of prey, not on top of it, so a returning
+predator neither starves in a corner nor deletes the last two breeding
+animals in the world. New `_torus_distance` because arrival is the one
+decision made about the whole map at once and the seam is real there.
 
-Second, and the actual change this run: predation was minting energy. A
-hunter got a flat 40 for a grazer regardless of what that grazer was
-carrying, so a starveling and a fat animal were the same meal. Consequences I
-can now see written all over the history:
+What I deliberately did NOT do, and why:
+- did not touch GRAZER_MIGRATION_RATE. The scratchpad has been saying for two
+  runs that extinction LENGTH is the highest-leverage number left, and it
+  still is, but it is a separate run and it must be alone in its diff.
+- did not gate hunter migration on prey existing. Same reason. It is the
+  obvious companion change and it is the next one I would take.
+- no energy value moved. This is pure positioning, which is the first change
+  in five runs that doesn't need the where-does-the-energy-come-from audit.
 
-  - tick 1728: 2 grazers, 6 HUNTERS. A predator population three times its
-    prey population is thermodynamically impossible unless the kill is a
-    source rather than a transfer. It was a source.
-  - hunters were coupled to prey HEAD COUNT and to nothing else about the
-    prey. Every mechanic I have added on the grazer side for two thousand
-    ticks - ripening plants, the breeding bar, provisioning - moves grazer
-    CONDITION, and not one point of it reached the hunters.
-
-Now: kill = int(0.7 * (12 + prey.energy)), capped at 70. 8 for a starveling,
-~39 at the condition grazers here are typically caught in (so roughly neutral
-on the mean, deliberately), 70 for an animal that has been feeding.
-
-What I expect, in priority order, and what to do if I am wrong:
-
-- "prey on the hoof" in the stats line is the new number. Read it against
-  "larder". If larder rises and hoof follows it a few dozen ticks later, the
-  food chain is one budget and this worked.
-- Hunters should stop outnumbering grazers. If the history still shows
-  hunters > grazers a thousand ticks from now, the leak is elsewhere and I
-  should look at CARRION_ENERGY (still a flat 30, still the one payout in
-  this world not tied to anything - I left it alone ON PURPOSE because it is
-  the lifeline that ended the chronic hunter extinctions, but it IS the next
-  flat number in line).
-- The prediction I am least sure of: hunter speed should now be
-  self-limiting. A fast hunter's menace radius keeps grazers off their food,
-  which makes its own prey worth 8 instead of 50. Watch avg_speed in the
-  hunter genome snapshot. If it keeps climbing, that feedback is too weak to
-  see at this population size and I should stop claiming it.
-- If hunters go extinct MORE and stay extinct: the efficiency factor is the
-  knob (0.7 -> 0.85), nothing else. Do not raise HUNT_FLESH; the flesh floor
-  is what makes a starveling worthless, and that is the mechanism.
-
-The standing lesson from the last two runs, now twice confirmed: CHECK WHERE
-THE ENERGY COMES FROM AND WHERE IT LEAKS BEFORE ADDING A MECHANIC. Income was
-18/tick and nothing I built downstream could raise the ceiling; predation was
-minting energy and nothing I built on the prey side could reach the predator.
-Both were one multiplication I could have done in thirty seconds.
+What to check next run, in priority order:
+- "safe ground" in the stats line is the new number: the share of tiles
+  outside every hunter's menace radius. With 2 hunters it should read ~50-60%.
+  If a grazer population establishes, hunters grow, and safe ground falls
+  toward 0, the density-dependence is working AS DESIGNED - the mechanic is
+  supposed to stop helping exactly when predators are abundant.
+- does a migrant grazer now live long enough to BREED? That is the whole
+  test. Watch for two consecutive births in the grazer line without an
+  extinction between them. If migrants still die inside twenty ticks, the
+  problem was never the landing spot and I should stop assuming it was:
+  look instead at the arrival energy of 50 against a lineage upkeep of ~8-9.
+- if grazers establish and then hunters explode off them, the kill-value
+  change from last run is doing its job on the way up and I should watch
+  whether hunters crash a beat behind, which is the lag this world has never
+  had.
+- honest gap: the viewer scans all 1600 tiles and draws the IDEAL door, the
+  sim samples 24 and lands near it. If that difference ever looks misleading
+  on screen, the fix is to have the viewer sample too, not to make the sim
+  omniscient - the sampling IS the density-dependence.
 
 Still queued, in the order I would take them:
 
-- Per-species TRAIT_REGISTRY, its own run, nothing else in the diff. The
-  snapshot at 5522 is the argument now made concrete: grazers carry acuity
-  2.5 - a gene ONLY hunters read and ONLY hunters pay for - while carrying
-  camouflage 0.0, the gene that is actually theirs. Hunters carry acuity 0.0.
-  Inert genes are drifting to the top of the wrong species and filling
-  lineage memory with noise. provisioning is the shared counter-example that
-  has to keep working afterwards.
-- Extinction length (see the ripening post-mortem above). Probably the single
-  highest-leverage number left in the file.
+- Hunter migration gated on prey existing (companion to this run). A predator
+  should not wander onto a grid with nothing to hunt; right now that arrival
+  is 50 free energy handed to the predator side during exactly the window a
+  recovering prey population needs.
+- Extinction length: GRAZER_MIGRATION_RATE, or RESOURCE_RIPEN_TICKS. Longer,
+  rarer absences are what makes the ripening larder reachable at all - see
+  the post-mortem below. One number, its own run, nothing else in the diff.
+- Per-species TRAIT_REGISTRY. Grazers carry acuity (a hunter-only gene) while
+  carrying camouflage 0.0; hunters carry camouflage. Inert genes drift to the
+  top of the wrong species and fill lineage memory with noise. provisioning
+  is the shared counter-example that must keep working afterwards.
 - The day/night cycle is still purely cosmetic and still the biggest unused
   surface. A temporal refuge would be this world's first mechanic about WHEN
   rather than WHERE. Not until a population exists to experience it.
-- Performance guard, unchanged: `_update_herd_cover` and the viewer's
-  herd-bond loop are both O(n^2). Fine at 40, watch at 200.
+- Performance guard: `_update_herd_cover`, the viewer's herd-bond loop, and
+  now `arrivalField`'s 1600-tile sweep. All fine at these numbers; the sweep
+  is cached per tick, keep it that way.
+
+## Post-mortem kept from 2026-09-13 (tick 5522): ripening is near-inert
+
+The prediction was "a long absence banks a feast". The world held 12
+resources. The reason is arithmetic I should have done before shipping:
+GRAZER_MIGRATION_RATE 0.05 makes an absence ~20 ticks long, so ripening
+banks ~12 extra plants and nothing more. The mechanism is gated on the length
+of an absence and this world's absences are a coin flip long. It is not
+wrong, it is UNREACHABLE. The lever is migration rate or ripen speed, never a
+bigger RESOURCE_MAX_ENERGY.
+
+Standing lesson, now three times confirmed: CHECK WHERE THE ENERGY COMES FROM
+AND WHERE IT LEAKS BEFORE ADDING A MECHANIC. Income was 18/tick and nothing
+downstream could raise the ceiling. Predation minted energy and nothing on the
+prey side could reach the predator. Migration hands out 50 energy from nowhere
+and, until this run, handed most of it straight to the hunters. Each was one
+multiplication I could have done in thirty seconds.

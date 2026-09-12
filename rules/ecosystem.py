@@ -94,6 +94,17 @@ creatures that actually managed to reproduce here. When a species dies out and
 a migrant wanders back in, that migrant arrives as a mutated descendant of the
 remembered stock instead of a blank species default - so an extinction is a
 bottleneck, not a factory reset.
+
+As of this run the migrant chooses WHERE, too. Arrival used to be two calls to
+random.randrange, which on a grid with two hunters standing on it dropped a
+returning grazer inside a predator's menace radius about as often as not - and
+the animal spent the fifty energy it arrived with fleeing instead of eating.
+A migrant now glances at a couple of dozen tiles and takes the best of them
+(see _arrival_site): a grazer wants ground outside every hunter's menace
+radius and close to something to eat, a hunter wants ground about its own
+sense_range from the nearest grazer - hunting distance, not ambush distance.
+No energy value moves. What changes is that a species walking back in gets the
+first twenty ticks it needs for any of the machinery above to matter at all.
 """
 
 from __future__ import annotations
@@ -460,6 +471,38 @@ PROVISION_ENERGY = 6
 HUNTER_MIGRATION_RATE = 0.02
 GRAZER_MIGRATION_RATE = 0.05
 
+# Where something that walks in from outside actually walks in.
+#
+# Arrival has been two calls to random.randrange since the first tick, and at
+# tick 5588 that is the most destructive pair of lines in this file. The event
+# log reads GRAZERS EXTINCT in eleven consecutive ticks and has read that way
+# for most of the last four hundred: a grazer migrates in, lands on a tile
+# drawn uniformly from sixteen hundred of them, and two speed-3 hunters each
+# project a 19x19 box of ground a grazer will not stand and feed on - close to
+# half the map. So the odds are roughly even that the animal arrives already
+# fleeing, burns its fifty energy at 8 a tick without eating, dies, and hands
+# the predators the only income this world has left. Every mechanic built on
+# the prey side - canopy cover, the herd, the ripening larder, the breeding bar
+# - needs that animal to survive its first twenty ticks before it can mean
+# anything, and arrival was rolling dice on exactly those twenty ticks.
+#
+# So arriving is a decision now, made on the same two criteria the animal will
+# spend the rest of its life making decisions on (see _arrival_key): a grazer
+# takes ground outside the menace radius of every hunter it can, and among
+# equally safe ground the tile nearest a plant. A hunter takes ground about its
+# own sense_range from the nearest grazer - so a returning predator neither
+# starves in an empty corner nor materialises on top of the last two breeding
+# animals in the world.
+#
+# It is density-dependent by construction, which is what keeps it from being a
+# flat prey buff: safe ground is precisely what hunters have less of the more
+# of them there are, so a world holding six hunters offers a migrant grazer
+# almost nothing while a world holding one offers it most of the map. And it is
+# a glance rather than omniscience - ARRIVAL_CANDIDATES tiles are considered,
+# no more - so a crowded grid still lands its migrants badly, just not blindly.
+ARRIVAL_CANDIDATES = 24    # tiles an arriving animal looks at before choosing
+ARRIVAL_SAFE_MARGIN = 6    # clearance past which one safe tile is as good as another
+
 SPECIES = ("grazer", "hunter")
 
 # Terrain is a fixed landscape generated once at world creation. Nothing here
@@ -716,22 +759,33 @@ class World:
             not any(c.species == "hunter" for c in self.creatures)
             and random.random() < HUNTER_MIGRATION_RATE
         ):
-            self.creatures.append(
-                _spawn_creature(
-                    "hunter", lineage=self.lineage.get("hunter"), origin="migrant"
-                )
+            migrant = _spawn_creature(
+                "hunter", lineage=self.lineage.get("hunter"), origin="migrant"
             )
+            # ...and it picks where it comes in, on the strength of its own
+            # genome: a hunter arrives within sight of prey rather than on top
+            # of it (see _arrival_site).
+            migrant.x, migrant.y = _arrival_site(
+                migrant, self.creatures, self.resources
+            )
+            self.creatures.append(migrant)
             self.events.append("a hunter migrates into the world")
 
         if (
             not any(c.species == "grazer" for c in self.creatures)
             and random.random() < GRAZER_MIGRATION_RATE
         ):
-            self.creatures.append(
-                _spawn_creature(
-                    "grazer", lineage=self.lineage.get("grazer"), origin="migrant"
-                )
+            migrant = _spawn_creature(
+                "grazer", lineage=self.lineage.get("grazer"), origin="migrant"
             )
+            # A grazer no longer walks blindly into the jaws of whatever wiped
+            # its species out: it comes in on ground that is outside the
+                # menace radius of every hunter it can manage, and close to
+            # something to eat.
+            migrant.x, migrant.y = _arrival_site(
+                migrant, self.creatures, self.resources
+            )
+            self.creatures.append(migrant)
             self.events.append("a grazer migrates into the world")
 
         grazers = [c for c in self.creatures if c.species == "grazer"]
@@ -990,6 +1044,112 @@ def _forage_location(terrain: list[str] | None) -> tuple[int, int]:
         x = random.randrange(GRID_SIZE)
         y = random.randrange(GRID_SIZE)
     return x, y
+
+
+def _wrapped_delta(a: int, b: int) -> int:
+    """Distance between two coordinates on one axis of a grid that wraps."""
+    d = abs(a - b) % GRID_SIZE
+    return min(d, GRID_SIZE - d)
+
+
+def _torus_distance(ax: int, ay: int, bx: int, by: int) -> int:
+    """Chebyshev distance with the map seam counted as the short way round.
+
+    Everything else in this world measures distance with a plain abs(), on
+    purpose: a creature judging what it can see is judging from inside its own
+    sense box, and _move_away deliberately refuses to mistake the seam for a
+    head start. Arrival is the one decision made about the whole map at once,
+    from outside it, so here the seam is real geometry - the tile at x=0 really
+    is next door to the tile at x=39, and a migrant that treated the corners
+    as the safest ground in the world would be wrong.
+    """
+    return max(_wrapped_delta(ax, bx), _wrapped_delta(ay, by))
+
+
+def _menace_radius(hunter: Creature) -> float:
+    """The ground this hunter's speed alone clears of feeding grazers: how far
+    it travels in the warning a nerveless grazer demands. It is the
+    FLIGHT_WARNING_TICKS case of _panic_radius, i.e. the ring the viewer
+    already draws around every predator, and it is the only thing an arriving
+    grazer knows about a hunter it has never met.
+    """
+    return max(1, hunter.speed) * FLIGHT_WARNING_TICKS
+
+
+def _arrival_key(
+    creature: Creature,
+    x: int,
+    y: int,
+    hunters: list[Creature],
+    grazers: list[Creature],
+    resources: list[Resource],
+) -> tuple[float, float]:
+    """How good this tile is as a place to walk into the world, for this
+    particular animal. Higher is better, and the two components are ordered -
+    the second only ever breaks ties in the first.
+
+    A grazer reads the same two things it will read for the whole of its life:
+    how far this tile sits OUTSIDE the menace radius of the worst hunter
+    (negative means inside it), saturating at ARRIVAL_SAFE_MARGIN because past
+    that one safe tile is as safe as another, and then how close the nearest
+    plant is. So it arrives somewhere it can eat without being kept off its
+    food - and when the grid offers no such place, it arrives wherever is least
+    bad, which is what a crowded world should feel like.
+
+    A hunter reads prey, but not the way an ambush would: it aims for ground
+    about its own sense_range from the nearest grazer, close enough to have
+    something to hunt and far enough that arriving is not itself a kill. With
+    no grazers anywhere the grid is featureless to it and every tile ties.
+    """
+    if creature.species == "hunter":
+        if not grazers:
+            return (0.0, 0.0)
+        nearest = min(_torus_distance(x, y, g.x, g.y) for g in grazers)
+        want = max(1, creature.sense_range)
+        return (float(-abs(nearest - want)), 0.0)
+
+    clearance = float(GRID_SIZE)
+    for hunter in hunters:
+        clearance = min(
+            clearance,
+            _torus_distance(x, y, hunter.x, hunter.y) - _menace_radius(hunter),
+        )
+    safety = min(float(ARRIVAL_SAFE_MARGIN), clearance)
+    if resources:
+        food = min(_torus_distance(x, y, r.x, r.y) for r in resources)
+    else:
+        food = GRID_SIZE
+    return (safety, float(-food))
+
+
+def _arrival_site(
+    creature: Creature, creatures: list[Creature], resources: list[Resource]
+) -> tuple[int, int]:
+    """Where this migrant comes in: the best of ARRIVAL_CANDIDATES tiles by
+    _arrival_key. A glance around the edge of the world, not omniscience -
+    which matters, because it is what makes the mechanic density-dependent
+    rather than absolute. On an empty grid two dozen samples find safe ground
+    immediately; with four hunters standing on it, half the samples come back
+    inside somebody's menace radius and the migrant takes what it can get.
+
+    Called with the world's creature list BEFORE the migrant is added to it, so
+    an arriving animal is never measuring the distance to itself. The founding
+    population and anything else that calls _spawn_creature directly is
+    untouched: it still lands on a uniformly random tile, exactly as every
+    creature in this world did until now.
+    """
+    hunters = [c for c in creatures if c.species == "hunter"]
+    grazers = [c for c in creatures if c.species == "grazer"]
+    best_key: tuple[float, float] | None = None
+    best = (creature.x, creature.y)
+    for _ in range(ARRIVAL_CANDIDATES):
+        x = random.randrange(GRID_SIZE)
+        y = random.randrange(GRID_SIZE)
+        key = _arrival_key(creature, x, y, hunters, grazers, resources)
+        if best_key is None or key > best_key:
+            best_key = key
+            best = (x, y)
+    return best
 
 
 def _spawn_creature(
