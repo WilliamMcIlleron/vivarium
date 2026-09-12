@@ -65,7 +65,15 @@ class ClaudeCodeCLIBackend(Backend):
             input=prompt,
             capture_output=True,
             text=True,
-            timeout=1000,
+            # Generous on purpose. The prompt embeds ecosystem.py and
+            # index.html in full and asks for both back the same way, so a
+            # real proposal takes 12-16 minutes to generate - right up
+            # against the old 1000s ceiling, which killed runs that were
+            # nearly finished and threw away the entire prompt AND response
+            # for nothing. That is the most expensive way this loop can
+            # fail, so the ceiling now sits well clear of normal work while
+            # still bounding a genuinely hung call.
+            timeout=2400,
         )
         if result.returncode != 0:
             message = result.stderr.strip() or result.stdout.strip()
