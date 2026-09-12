@@ -173,6 +173,7 @@
     <span class="swatch"><span class="ring" style="border-color:var(--creature-high);border-style:dotted"></span>gregariousness (how strongly a grazer walks to company instead of food)</span>
     <span class="swatch"><span class="arc"></span>breeding bar (the rose collar right on the body: a newborn is now sent out with four ticks of the body it inherits, and the parent has to save up for that first - so a WIDE collar is an expensive animal with a high bar to clear, and a FULL one is an animal that has cleared it)</span>
     <span class="swatch"><span class="core"></span>provisioning (the rose core, on either species: how much of itself this animal pours into each newborn on top of that runway - no energy is created, it only moves down a generation)</span>
+    <span class="swatch"><span class="ring" style="border-color:var(--hunter-high);border-width:2.5px"></span>quarry (the orange rim on a grazer: what a hunter would actually bank for catching it - the body plus everything that grazer has managed to eat, minus what is lost crossing between species - so a fed grazer glows to a predator and a starving one is barely worth the chase)</span>
     <span class="swatch"><span class="tri" style="border-bottom-color:var(--hunter-high)"></span>hunter (brighter = more energy)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--hunter-high)"></span>acuity (rings around a hunter - sees through camouflage, herds and canopy, costs energy every tick)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--hunter-high);border-style:dashed"></span>menace (the wide sparse ring: how much ground this hunter's speed alone clears of feeding grazers, whether or not it ever catches one)</span>
@@ -208,6 +209,9 @@ const PROVISION_ENERGY = 6;    // must match PROVISION_ENERGY in rules/ecosystem
 const RESOURCE_ENERGY = 30;      // must match RESOURCE_ENERGY - what a plant is worth the tick it sprouts
 const RESOURCE_RIPEN_TICKS = 2;  // must match RESOURCE_RIPEN_TICKS - ticks of undisturbed growth per extra energy
 const RESOURCE_MAX_ENERGY = 75;  // must match RESOURCE_MAX_ENERGY - where a plant stops putting on weight
+const HUNT_FLESH = 12;         // must match HUNT_FLESH - what a body is worth whatever shape it was in
+const HUNT_EFFICIENCY = 0.7;   // must match HUNT_EFFICIENCY - the share of a meal a predator actually banks
+const HUNT_MAX_ENERGY = 70;    // must match HUNT_MAX_ENERGY - ceiling on a single sitting
 const MAX_MENACE_SPEED = 6;    // only used to normalise how loudly a hunter's menace ring is drawn
 const MOVE_COST = 1;           // must match MOVE_COST in rules/ecosystem.py - energy/tick per point of speed
 const ACUITY_COST = 1;         // must match ACUITY_COST - energy/tick per full point of a hunter's acuity
@@ -259,6 +263,21 @@ function resourceEnergy(r) {
     RESOURCE_ENERGY + Math.floor((r.age || 0) / RESOURCE_RIPEN_TICKS)
   );
 }
+
+// Mirror of _kill_value() in rules/ecosystem.py: what a hunter actually banks
+// for catching this grazer - the body itself plus whatever energy the animal
+// had saved up, minus the share lost crossing between species, capped at one
+// sitting. A kill used to be a flat 40 for every grazer alive; now it ranges
+// from 8 for a starveling to 70 for one that has been feeding all day, which
+// is the only place prey CONDITION enters the predators' budget.
+function killValue(c) {
+  return Math.min(
+    HUNT_MAX_ENERGY,
+    Math.floor(HUNT_EFFICIENCY * (HUNT_FLESH + Math.max(0, c.energy ?? 0)))
+  );
+}
+
+const MIN_KILL_VALUE = Math.floor(HUNT_EFFICIENCY * HUNT_FLESH);
 
 // Chebyshev distance - the box-shaped metric both sense_range and flight use
 // in rules/ecosystem.py. Hoisted to module scope now that the flight rings
@@ -896,6 +915,35 @@ function draw(now) {
     ctx.globalAlpha = 1;
   }
 
+  // quarry: what each grazer is actually worth to a hunter (see _kill_value in
+  // rules/ecosystem.py). A kill is no longer a flat payout - it is the body
+  // plus whatever that animal has managed to eat, less what is lost crossing
+  // between species - so a grazer that has been feeding is a feast and one
+  // three ticks from starving is barely worth the chase. Drawn as a rim of
+  // predator-orange laid right on the grazer's own outline, brightening and
+  // thickening with what the hunters would get for it. It is the only marking
+  // in this world that paints one species in the other's hue, because that is
+  // precisely what the number means: this is the grazer as a predator sees it.
+  // Read it against the green body underneath - the same energy drives both,
+  // and a bright grazer is now a bright target.
+  for (const c of creatures) {
+    if (c.species === 'hunter') continue;
+    const e = Math.max(0, Math.min(1, (c.energy ?? 30) / 80));
+    const worth = Math.max(0, Math.min(1,
+      (killValue(c) - MIN_KILL_VALUE) / (HUNT_MAX_ENERGY - MIN_KILL_VALUE)));
+    if (worth <= 0) continue;
+    const r = cell * (0.16 + 0.14 * e);
+    const cx = c.drawX * cell + cell / 2;
+    const cy = c.drawY * cell + cell / 2;
+    ctx.globalAlpha = c.alpha * (0.10 + 0.55 * worth);
+    ctx.strokeStyle = '#ff8f6b';
+    ctx.lineWidth = Math.max(0.6, cell * (0.018 + 0.030 * worth));
+    ctx.beginPath();
+    ctx.arc(cx, cy, r + cell * 0.05, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
   // hunters: triangle (a predator silhouette, distinct from the grazer dot),
   // red/orange ramp instead of green so the two species read apart at a
   // glance even before you know the shape convention. Terrain does nothing
@@ -1046,6 +1094,18 @@ function draw(now) {
   const larder = (world.resources || []).reduce(
     (sum, r) => sum + resourceEnergy(r), 0);
 
+  // The predators' larder: what the whole grazer population is currently worth
+  // if it were caught (see _kill_value in rules/ecosystem.py). Read it against
+  // "larder", the energy standing on the ground, because they are now the same
+  // budget one step apart - plants put weight on grazers and that weight is
+  // what a hunter eats, so the top of the food chain gets rich a few dozen
+  // ticks after the bottom does. A decent grazer count with a low hoof total is
+  // a prey population being kept off its food rather than eaten: exactly what a
+  // fast hunter's menace ring does to it.
+  const onTheHoof = creatures
+    .filter(c => c.species !== 'hunter')
+    .reduce((sum, c) => sum + killValue(c), 0);
+
   const carrionList = world.carrion || [];
   const edibleCount = carrionList.filter(edibleCarrion).length;
   const remainsCount = carrionList.length - edibleCount;
@@ -1086,6 +1146,7 @@ function draw(now) {
     `<span>brood stake <b>${broodAvg.toFixed(1)}</b></span>` +
     `<span>resources <b>${(world.resources || []).length}</b></span>` +
     `<span>larder <b>${larder}</b></span>` +
+    `<span>prey on the hoof <b>${onTheHoof}</b></span>` +
     `<span>carcasses <b>${edibleCount}</b></span>` +
     `<span>hunter remains <b>${remainsCount}</b></span>`;
 

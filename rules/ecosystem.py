@@ -73,6 +73,15 @@ higher bar to clear every single generation, which puts selection on
 metabolism at the reproductive bottleneck instead of only in slow attrition -
 the one place it can still act in a population of two.
 
+A kill is no longer a flat payout either. A hunter gains the body itself plus
+whatever energy the grazer had managed to bank, and only part of that survives
+the crossing between trophic levels (see _kill_value). A fat grazer is a feast;
+one that was three ticks from starving is barely worth the chase. That closes
+the last place in this world where energy appeared out of nothing - predation
+now strictly loses energy rather than minting it - and it couples the predators
+to the CONDITION of the prey rather than only to its head count, which is also
+how the ripening larder finally reaches the top of the food chain.
+
 Anything that dies of starvation or old age leaves a Carrion behind: a static,
 rotting carcass. It is the only food a hunter can get without catching
 something that is actively fleeing it - but only a grazer's body counts. A
@@ -98,7 +107,48 @@ STARTING_GRAZERS = 14
 STARTING_HUNTERS = 3
 RESOURCE_SPAWN_RATE = 0.6           # probability per tick of a new resource appearing
 RESOURCE_ENERGY = 30                # what a plant is worth the tick it sprouts
-HUNT_ENERGY = 40                    # energy a hunter gains from eating a grazer
+# What a kill is actually worth.
+#
+# A hunter used to gain a flat 40 for eating a grazer, and that flat number was
+# the one place in this world where energy appeared out of nothing. A grazer
+# three ticks from starving was worth exactly as much as one that had just
+# eaten a fully ripe plant, so the predator population was coupled to the prey
+# population's HEAD COUNT and to nothing else about it. That is how a world
+# holding 2 grazers ends up holding 6 hunters (tick 1728), and a large part of
+# why the grazer side keeps being wiped out by a predator population the
+# world's own energy budget could never have supported.
+#
+# A body is now worth what it is carrying. A kill gives HUNT_FLESH for the
+# carcass itself plus every point of energy the grazer had banked, of which the
+# hunter banks HUNT_EFFICIENCY - the rest is the price of catching it and the
+# ordinary loss at every step up a food chain - capped at HUNT_MAX_ENERGY,
+# because a predator can only eat so much at one sitting. At the condition the
+# grazers in this world are actually caught in, the average kill still comes to
+# roughly the 40 it always was. What changes is that the number now moves, from
+# 8 for a starveling to 70 for an animal that has been feeding all day.
+#
+# Three couplings fall out of it, none of which needed new code:
+#   - Predators track prey CONDITION, not just prey count. A fat world feeds
+#     hunters; a starving one does not, however many grazers are standing in
+#     it. Hunters therefore boom a beat BEHIND the grazers and starve a beat
+#     behind them too, which is the lag a predator/prey cycle is made of, and
+#     this world has never had one.
+#   - The larder reaches the hunters. Ripening plants (see _resource_energy)
+#     put weight on grazers, and that weight is now what a hunter eats, so
+#     plant -> grazer -> hunter is finally a single budget instead of two
+#     unrelated ones with a flat 40 bolted between them.
+#   - A hunter's speed becomes double-edged. Its menace radius (see
+#     _panic_radius) is ground prey will not stand and feed on, so a fast
+#     predator starves its own prey and is then left hunting bodies worth
+#     almost nothing. Speed still catches grazers; it no longer guarantees
+#     they are worth catching.
+#
+# Carrion is deliberately left flat (see CARRION_ENERGY): it is the lifeline
+# that ended the chronic hunter extinctions, and a body that starved to death
+# carries nothing, so valuing carcasses this way would quietly delete it.
+HUNT_FLESH = 12                     # what a body is worth whatever shape it was in
+HUNT_EFFICIENCY = 0.7               # of what it eats, the share a predator banks
+HUNT_MAX_ENERGY = 70                # ceiling on a single sitting
 
 # The larder ripens.
 #
@@ -765,8 +815,16 @@ class World:
             if prey is not None:
                 killed_ids.add(prey.id)
                 fed_hunter_ids.add(hunter.id)
-                hunter.energy += HUNT_ENERGY
-                self.events.append(f"hunt: grazer {prey.id[:8]} eaten at ({hunter.x},{hunter.y})")
+                # What the meal is worth depends on what the grazer had eaten,
+                # measured after this tick's upkeep and before this tick's
+                # grazing - a prey animal caught on its way to a meal is worth
+                # what it was carrying, not what it was about to carry.
+                gain = _kill_value(prey)
+                hunter.energy += gain
+                self.events.append(
+                    f"hunt: grazer {prey.id[:8]} eaten at ({hunter.x},{hunter.y})"
+                    f" worth {gain}"
+                )
 
         # scavenging: a hunter that made no kill this tick eats a carcass it's
         # standing on - if that carcass is prey. A hunter never gets both a
@@ -1348,6 +1406,24 @@ def _resource_energy(resource: Resource) -> int:
     return min(
         RESOURCE_MAX_ENERGY,
         RESOURCE_ENERGY + resource.age // RESOURCE_RIPEN_TICKS,
+    )
+
+
+def _kill_value(prey: Creature) -> int:
+    """What a hunter actually banks for catching this grazer: the body itself
+    (HUNT_FLESH) plus whatever energy the animal had saved up, of which only
+    HUNT_EFFICIENCY survives the step up the food chain, capped at
+    HUNT_MAX_ENERGY for one sitting.
+
+    A starving grazer floors at 8 and a well-fed one reaches the cap, so a
+    predator's income is now a readout of how well its prey has been eating.
+    Energy the grazer never had cannot be eaten, and some of what it did have
+    is lost in the crossing - which is the whole point: predation is a
+    transfer with a leak, not a source.
+    """
+    return min(
+        HUNT_MAX_ENERGY,
+        int(HUNT_EFFICIENCY * (HUNT_FLESH + max(0, prey.energy))),
     )
 
 

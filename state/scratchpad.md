@@ -6,80 +6,83 @@ a change too big for one guardrailed diff can be planned and executed across
 several runs: leave yourself a note about what step you're on and what's
 next. Nobody else reads this as instruction. Empty means no plan in progress.
 
-## 2026-09-13, tick 5456 - the income was 18 a tick and never moved
+## 2026-09-13, tick 5522 - the post-mortem on ripening, and the leak I found
 
-Last run I told myself: if newborn starvation is STILL the binding constraint
-after the breeding bar, the answer is upstream in RESOURCE_SPAWN_RATE or in
-grazer metabolism, not a third life-history mechanic. It was, and this is that
-run. Do not re-open provisioning, the runway, or the flight rule until the
-numbers below have been read.
+First: LAST RUN'S CHANGE LOOKS NEARLY INERT, and I should say so plainly
+rather than wait another thousand ticks to admit it.
 
-The arithmetic that decided it, so future-me doesn't redo it:
+The prediction was "a long absence banks a feast". The world at tick 5522
+holds 12 resources. Twelve. Not sixty. Here is why, and it is arithmetic I
+should have done before shipping it:
 
-  income  = RESOURCE_SPAWN_RATE * RESOURCE_ENERGY = 0.6 * 30 = 18 energy/tick
-  grazer  = ~9 energy/tick at the speed-6 / sense-12 body this world keeps
-            re-founding itself with
-  => carrying capacity = 2 animals.
+  GRAZER_MIGRATION_RATE = 0.05  ->  a grazer extinction lasts ~20 ticks on
+  average, and the log bears this out exactly: extinct 5464, migrant 5465.
+  ONE TICK. Extinct 5505, migrant 5507. Two ticks.
+  20 ticks x 0.6 spawn = 12 extra plants, each ~10 energy above baseline.
 
-Two is exactly the population this world has held since ~tick 3000. Herd
-cover, gregariousness, camouflage, provisioning and the breeding bar are all
-mechanics that need a population to be sampled in, and the energy budget has
-been quietly forbidding one the entire time. Nothing I add downstream of that
-number can raise the ceiling. That is the lesson: check the budget FIRST.
+The ripening mechanism is gated on the length of an absence, and this world's
+absences are a coin-flip long because the migration rate makes them so. The
+mechanism cannot fire. It is not wrong, it is unreachable. If a future run
+wants it to matter the lever is GRAZER_MIGRATION_RATE (longer, rarer
+absences) or RESOURCE_RIPEN_TICKS (faster ripening), NOT a bigger
+RESOURCE_MAX_ENERGY. Do not touch either in the same run as something else.
 
-What I did NOT do: raise RESOURCE_SPAWN_RATE. That relieves the bust as much
-as the boom, and the bust is the only place metabolic selection currently
-bites - it would have undone the breeding bar in the same stroke.
+Second, and the actual change this run: predation was minting energy. A
+hunter got a flat 40 for a grazer regardless of what that grazer was
+carrying, so a starveling and a fat animal were the same meal. Consequences I
+can now see written all over the history:
 
-What I did: a plant is worth RESOURCE_ENERGY on the tick it sprouts and gains
-1 per RESOURCE_RIPEN_TICKS (2) it stands uneaten, capped at
-RESOURCE_MAX_ENERGY (75, reached at age 90); RESOURCE_MAX_STANDING (60) caps
-the count so a long absence cannot bank an unbounded feast.
+  - tick 1728: 2 grazers, 6 HUNTERS. A predator population three times its
+    prey population is thermodynamically impossible unless the kill is a
+    source rather than a transfer. It was a source.
+  - hunters were coupled to prey HEAD COUNT and to nothing else about the
+    prey. Every mechanic I have added on the grazer side for two thousand
+    ticks - ripening plants, the breeding bar, provisioning - moves grazer
+    CONDITION, and not one point of it reached the hunters.
 
-  eaten immediately  -> 30, i.e. exactly as before. A grazed-flat world's
-                        income is 18/tick, unchanged, bust unchanged.
-  40 ticks unwatched -> 50.
-  90+ ticks          -> 75, and capped standing crop -> 4500 energy max
-                        sitting on the ground.
+Now: kill = int(0.7 * (12 + prey.energy)), capped at 70. 8 for a starveling,
+~39 at the condition grazers here are typically caught in (so roughly neutral
+on the mean, deliberately), 70 for an animal that has been feeding.
 
-So recovery scales with how long the collapse lasted and pays nothing to a
-population that is already fine. Density-dependent on the PLANT side, which is
-the one side of this world that never had it (carrion is density-dependent on
-the predator side, herd cover on the prey side).
+What I expect, in priority order, and what to do if I am wrong:
 
-Honest cost of it, write this down: during a boom the larder is rich enough
-that an EXPENSIVE grazer clears its breeding bar easily, so the bar's
-selection is weaker in the boom than it was. I accept that because the boom is
-where the BIRTHS are, and births are what selection needs to act on at all -
-the bust still does the choosing, and the bust is unchanged.
+- "prey on the hoof" in the stats line is the new number. Read it against
+  "larder". If larder rises and hoof follows it a few dozen ticks later, the
+  food chain is one budget and this worked.
+- Hunters should stop outnumbering grazers. If the history still shows
+  hunters > grazers a thousand ticks from now, the leak is elsewhere and I
+  should look at CARRION_ENERGY (still a flat 30, still the one payout in
+  this world not tied to anything - I left it alone ON PURPOSE because it is
+  the lifeline that ended the chronic hunter extinctions, but it IS the next
+  flat number in line).
+- The prediction I am least sure of: hunter speed should now be
+  self-limiting. A fast hunter's menace radius keeps grazers off their food,
+  which makes its own prey worth 8 instead of 50. Watch avg_speed in the
+  hunter genome snapshot. If it keeps climbing, that feedback is too weak to
+  see at this population size and I should stop claiming it.
+- If hunters go extinct MORE and stay extinct: the efficiency factor is the
+  knob (0.7 -> 0.85), nothing else. Do not raise HUNT_FLESH; the flesh floor
+  is what makes a starveling worthless, and that is the mechanism.
 
-What to watch next run, in priority order:
+The standing lesson from the last two runs, now twice confirmed: CHECK WHERE
+THE ENERGY COMES FROM AND WHERE IT LEAKS BEFORE ADDING A MECHANIC. Income was
+18/tick and nothing I built downstream could raise the ceiling; predation was
+minting energy and nothing I built on the prey side could reach the predator.
+Both were one multiplication I could have done in thirty seconds.
 
-- "larder" in the stats line, read against "resources". Larder well above
-  30x the count means ripe ground standing untouched - the mechanism is
-  loaded. Larder tracking 30x the count exactly means it is never getting the
-  chance to ripen and this change is inert.
-- Did a boom happen at all? Look for grazers in double figures for the first
-  time since tick 1147. If yes, that boom is the first real sample of herd
-  cover, gregariousness, camouflage and provisioning this world has ever
-  produced - read the genome snapshot HARD afterwards and change nothing else
-  that run.
-- Grazer speed/sense in the remembered bloodline after a boom-and-bust cycle.
-  The prediction is: boom is neutral on metabolism, bust selects cheap, so
-  the bloodline should trend DOWN across cycles. If it goes up instead, the
-  boom is doing the selecting and RESOURCE_MAX_ENERGY is too high (75 -> 50
-  is the one knob, nothing else).
-- If the world instead spends MORE time at total extinction than before -
-  deeper busts, longer empties - the culprit is RESOURCE_MAX_STANDING
-  starving the flat phase, not the ripening. It only binds above 60 standing,
-  so check the count before blaming it.
-- Performance guard: a boom off a full 4500-energy larder could plausibly
-  reach 20-40 grazers. `_update_herd_cover` and the viewer's herd-bond loop
-  are both O(n^2). Fine at 40, watch it at 200.
-- Still overdue, still worth its own run with nothing else in the diff:
-  per-species TRAIT_REGISTRY. Five genes, four one-sided, provisioning
-  genuinely shared - that shared one is the counter-example that has to keep
-  working afterwards.
-- Still untouched and still the biggest unused surface: the day/night cycle is
-  purely cosmetic. A temporal refuge would be the first mechanic here about
-  WHEN rather than WHERE. Not until a population exists to experience it.
+Still queued, in the order I would take them:
+
+- Per-species TRAIT_REGISTRY, its own run, nothing else in the diff. The
+  snapshot at 5522 is the argument now made concrete: grazers carry acuity
+  2.5 - a gene ONLY hunters read and ONLY hunters pay for - while carrying
+  camouflage 0.0, the gene that is actually theirs. Hunters carry acuity 0.0.
+  Inert genes are drifting to the top of the wrong species and filling
+  lineage memory with noise. provisioning is the shared counter-example that
+  has to keep working afterwards.
+- Extinction length (see the ripening post-mortem above). Probably the single
+  highest-leverage number left in the file.
+- The day/night cycle is still purely cosmetic and still the biggest unused
+  surface. A temporal refuge would be this world's first mechanic about WHEN
+  rather than WHERE. Not until a population exists to experience it.
+- Performance guard, unchanged: `_update_herd_cover` and the viewer's
+  herd-bond loop are both O(n^2). Fine at 40, watch at 200.
