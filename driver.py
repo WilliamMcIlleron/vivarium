@@ -206,11 +206,24 @@ don't need to touch _reproduce/_spawn_creature by hand for it.
 
 Respond with exactly this JSON shape:
 {{
-  "files": {{"relative/path.py": "full new file content", ...}},
+  "edits": [
+    {{"file": "rules/ecosystem.py",
+      "old": "exact text to find, copied from the source above",
+      "new": "what to replace it with"}}
+  ],
   "goals_update": "full new content of state/goals.md, or null if unchanged",
   "scratchpad_update": "full new content of state/scratchpad.md, or null if unchanged",
   "changelog_entry": "1-3 sentences: what you changed and why"
 }}
+
+Send edits, not whole files. Rewriting ecosystem.py and index.html in full is about 30,000 tokens of output and takes a quarter of an hour to generate; runs doing that have repeatedly been killed by the CLI timeout with a nearly finished answer, or swallowed a whole usage window in one go. The same change as edits is a few hundred lines. Rules, each of which costs the entire run if broken:
+- "old" must appear EXACTLY ONCE in the current file. If the text you want isn't unique, widen it with surrounding lines until it is.
+- Copy "old" character-for-character from the source shown above, indentation included. It is matched literally - not a regex, not fuzzy.
+- Several edits may touch the same file. They apply in order, so a later edit sees the result of an earlier one.
+- To create a NEW file, use "old": "" and put the whole file in "new".
+
+If you genuinely need to rewrite a whole file, you may send this instead of (or alongside) "edits" - edits are applied on top of it:
+  "files": {{"relative/path.py": "full new file content"}}
 """
 
 RETRY_PROMPT_TEMPLATE = """\
@@ -227,11 +240,24 @@ pytest output from running the test suite against your proposal:
 
 Respond with exactly this JSON shape:
 {{
-  "files": {{"relative/path.py": "full new file content", ...}},
+  "edits": [
+    {{"file": "rules/ecosystem.py",
+      "old": "exact text to find, copied from the source above",
+      "new": "what to replace it with"}}
+  ],
   "goals_update": "full new content of state/goals.md, or null if unchanged",
   "scratchpad_update": "full new content of state/scratchpad.md, or null if unchanged",
   "changelog_entry": "1-3 sentences: what you changed and why"
 }}
+
+Send edits, not whole files. Rewriting ecosystem.py and index.html in full is about 30,000 tokens of output and takes a quarter of an hour to generate; runs doing that have repeatedly been killed by the CLI timeout with a nearly finished answer, or swallowed a whole usage window in one go. The same change as edits is a few hundred lines. Rules, each of which costs the entire run if broken:
+- "old" must appear EXACTLY ONCE in the current file. If the text you want isn't unique, widen it with surrounding lines until it is.
+- Copy "old" character-for-character from the source shown above, indentation included. It is matched literally - not a regex, not fuzzy.
+- Several edits may touch the same file. They apply in order, so a later edit sees the result of an earlier one.
+- To create a NEW file, use "old": "" and put the whole file in "new".
+
+If you genuinely need to rewrite a whole file, you may send this instead of (or alongside) "edits" - edits are applied on top of it:
+  "files": {{"relative/path.py": "full new file content"}}
 """
 
 REFLECTION_PROMPT_TEMPLATE = """\
@@ -395,6 +421,14 @@ def _run_code_change(world: World, budget: dict, log: logging.Logger) -> None:
         log.error(f"raw response was:\n{raw[:4000]}")
         sys.exit(1)
 
+    resolved, reason = _resolve_proposal_files(proposal)
+    if resolved is None:
+        msg = f"evolve run REJECTED: {reason}"
+        _append_changelog(msg)
+        log.warning(msg)
+        sys.exit(1)
+    proposal["files"] = resolved
+
     ok, reason = _validate_proposal(proposal, budget)
     if not ok:
         msg = f"evolve run REJECTED: {reason}"
@@ -460,7 +494,10 @@ def _attempt_retry(
     parse or violates the guardrails is not retried again.
     """
     retry_prompt = RETRY_PROMPT_TEMPLATE.format(
-        previous_files=json.dumps(proposal["files"], indent=2),
+        # Echo back whatever the model actually sent. If it sent edits, that
+        # is a few hundred lines; re-sending the resolved whole files here
+        # would put the 30k tokens straight back into the retry prompt.
+        previous_files=json.dumps(proposal.get("edits") or proposal["files"], indent=2),
         test_output=test_output[-4000:],
     )
     raw = backend.complete(retry_prompt)
@@ -470,6 +507,12 @@ def _attempt_retry(
         log.error("evolve retry FAILED: could not parse retry response as JSON.")
         log.error(f"raw retry response was:\n{raw[:4000]}")
         return None
+
+    resolved, reason = _resolve_proposal_files(retry_proposal)
+    if resolved is None:
+        log.warning(f"evolve retry REJECTED: {reason}")
+        return None
+    retry_proposal["files"] = resolved
 
     ok, reason = _validate_proposal(retry_proposal, budget)
     if not ok:
@@ -551,6 +594,75 @@ def _parse_proposal(raw: str) -> dict | None:
         except json.JSONDecodeError:
             continue
     return None
+
+
+def _resolve_proposal_files(proposal: dict) -> tuple[dict | None, str]:
+    """Turn whatever shape the model answered in into {path: full new content}.
+
+    `files` (whole-file rewrites) was the original protocol and still works -
+    a brand-new file has no smaller form, and the retry tests speak it.
+    `edits` is the cheap one: {file, old, new} search-and-replace pairs.
+
+    The reason this exists: a proposal that rewrote ecosystem.py and
+    index.html in full was ~30,000 tokens of output and 12-16 minutes of
+    generation. That is what kept hitting the CLI timeout with a nearly
+    finished answer, and what let a single run swallow an entire usage
+    window. The same change as edits is a few hundred lines.
+
+    Nothing downstream changes: this returns the same dict `files` always
+    produced, and it still faces the allowlist, PROTECTED.md, the diff caps
+    and the test suite exactly as before.
+    """
+    files = dict(proposal.get("files") or {})
+    edits = proposal.get("edits")
+    if edits is None:
+        if files:
+            return files, ""
+        return None, "proposal contained neither 'files' nor 'edits'"
+    if not isinstance(edits, list):
+        return None, "'edits' must be a list"
+
+    for i, edit in enumerate(edits):
+        if not isinstance(edit, dict):
+            return None, f"edit {i} is not an object"
+        path, old, new = edit.get("file"), edit.get("old"), edit.get("new")
+        if not path or old is None or new is None:
+            return None, f"edit {i} needs 'file', 'old' and 'new'"
+        # _validate_proposal checks this too, but do it before touching the
+        # disk so a traversal path is never even read.
+        if not _path_allowed(path):
+            return None, f"edit {i} targets disallowed path: {path}"
+
+        full = ROOT / path
+        if path in files:
+            current = files[path]
+        elif full.exists():
+            current = full.read_text()
+        else:
+            current = None
+
+        if old == "":
+            if current is not None:
+                return None, f"edit {i} creates {path}, which already exists"
+            files[path] = new
+            continue
+
+        if current is None:
+            return None, f"edit {i} targets {path}, which does not exist"
+        found = current.count(old)
+        if found == 0:
+            return None, (
+                f"edit {i}: 'old' text not found in {path} - it must be copied "
+                f"character-for-character, indentation included, from the current file"
+            )
+        if found > 1:
+            return None, (
+                f"edit {i}: 'old' text appears {found} times in {path} - widen it "
+                f"with surrounding lines until it matches exactly one place"
+            )
+        files[path] = current.replace(old, new, 1)
+
+    return files, ""
 
 
 def _validate_proposal(proposal: dict, budget: dict) -> tuple[bool, str]:
