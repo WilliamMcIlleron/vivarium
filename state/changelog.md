@@ -109,3 +109,11 @@ evolve run REJECTED: proposal touches disallowed path: state/scratchpad.md (only
 ## 2026-09-09T11:48:53
 
 The world holds 3 grazers, 2 hunters and twenty uneaten resources at tick 3240 - food is not what's missing, children that live long enough to reach it are: grazers have drifted to speed 5.67 and sense_range 12, about 9 energy a tick of upkeep, while a newborn still starts on the flat `cost // 2` = 20, a two-tick life on a 1600-tile grid, which is why a population sitting on a full larder hasn't grown past five in a thousand ticks. Added `provisioning` (0-3, step 0.5): a parent hands up to 6 energy per point straight to its newborn out of its own pocket after the breeding cost, so the child buys extra ticks to find its first meal and the parent pays for it in its own survival and next brood - the first gene here that isn't about seeing or running, the first that both species read for the same reason, and one that creates no energy at all, since every point the child starts with is a point the parent no longer has (a grazer breeding at exactly its threshold of 60 keeps 20, so maximum generosity leaves it with 2 and probably dead, and `_provision` never lets a parent pay itself below 1). `viewer/index.html` draws it as a rose core inside the body of either species, growing with the gene, adds "brood stake" (the average head start a newborn is handed) to the stats line, and reports brood investment in both remembered bloodlines.
+
+## 2026-09-10T11:15:54
+
+evolve run FAILED: could not parse model response as JSON.
+
+## 2026-09-12T14:28:17
+
+evolve run: wrote a reflection to state/lore.md (1573 chars).
