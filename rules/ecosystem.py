@@ -105,6 +105,18 @@ radius and close to something to eat, a hunter wants ground about its own
 sense_range from the nearest grazer - hunting distance, not ambush distance.
 No energy value moves. What changes is that a species walking back in gets the
 first twenty ticks it needs for any of the machinery above to matter at all.
+
+And as of this run the predators are called in by the prey rather than by the
+calendar. Hunter migration was an unconditional coin flip, so a hunter could
+walk onto a grid with nothing alive on it to hunt - and did, at tick 5643, four
+ticks before the grazer did - arriving with fifty energy out of nowhere to
+spend on the one animal holding this world open. A hunter now comes only when
+the standing grazers are worth coming for, measured in the predators' own
+currency (see _prey_on_the_hoof and _hunter_migration_chance): nothing at all
+below a threshold no single animal can reach by itself, ramping up to the old
+flat rate as the herd fattens. The gate is self-clearing, because the only
+thing that opens it is a prey population doing well enough to feed whatever
+comes through it.
 """
 
 from __future__ import annotations
@@ -471,6 +483,42 @@ PROVISION_ENERGY = 6
 HUNTER_MIGRATION_RATE = 0.02
 GRAZER_MIGRATION_RATE = 0.05
 
+# How rich the prey has to be before a predator makes the journey.
+#
+# Hunter migration has been an unconditional coin flip since the first tick,
+# and the event log at 5638-5647 is what that costs: HUNTERS EXTINCT at 5638,
+# a hunter migrates in at 5643 onto a grid with no grazers standing on it at
+# all, and the grazer that finally arrives at 5647 walks into a world that
+# already has a predator in it. That arrival is fifty energy conjured out of
+# nowhere and handed to the predator side during exactly the window - the first
+# twenty ticks of a recovering prey population - that every mechanic built on
+# the grazer side needs in order to mean anything. Last run gave a migrant a
+# choice of WHERE; this is the same argument about WHEN.
+#
+# So the predators are drawn by the prey now. What they are drawn by is prey on
+# the hoof (see _prey_on_the_hoof): the standing grazer population valued in
+# the predators' own currency, the same _kill_value a hunter actually banks, so
+# it reads head count and CONDITION together - which is the coupling the
+# kill-value change introduced, and the one number an animal deciding whether a
+# range is worth entering would care about. Below HUNTER_MIGRATION_HOOF nothing
+# comes; from there the chance ramps to the old flat HUNTER_MIGRATION_RATE at
+# HUNTER_MIGRATION_FULL, so a thin herd draws a predator occasionally and a fat
+# one draws it exactly as often as this world ever did.
+#
+# It is deliberately about a POPULATION and never an individual: one grazer,
+# however well fed, is capped at HUNT_MAX_ENERGY = 70 and cannot on its own
+# reach the threshold. A single animal holding this world open has stopped
+# being a reason for a predator to appear, and that is precisely the case this
+# world keeps failing.
+#
+# No energy value moves and nothing is banned. The gate is self-clearing by
+# construction, because the only thing that can open it is a prey population
+# doing well enough to feed what comes through it - the same density-dependence
+# as carrion, herd cover, the ripening larder and the arrival site, applied to
+# the last unconditional event left in the tick.
+HUNTER_MIGRATION_HOOF = 90    # prey worth below which no predator comes at all
+HUNTER_MIGRATION_FULL = 180   # ...and at which they come at the full old rate
+
 # Where something that walks in from outside actually walks in.
 #
 # Arrival has been two calls to random.randrange since the first tick, and at
@@ -757,7 +805,7 @@ class World:
         # species ever reproduced here.
         if (
             not any(c.species == "hunter" for c in self.creatures)
-            and random.random() < HUNTER_MIGRATION_RATE
+            and random.random() < _hunter_migration_chance(self.creatures)
         ):
             migrant = _spawn_creature(
                 "hunter", lineage=self.lineage.get("hunter"), origin="migrant"
@@ -1585,6 +1633,35 @@ def _kill_value(prey: Creature) -> int:
         HUNT_MAX_ENERGY,
         int(HUNT_EFFICIENCY * (HUNT_FLESH + max(0, prey.energy))),
     )
+
+
+def _prey_on_the_hoof(creatures: list[Creature]) -> int:
+    """The standing prey population valued in the predators' own currency: what
+    every living grazer would be worth to whatever caught it (see _kill_value).
+
+    Head count and condition in a single number - four starvelings and one
+    animal that has been feeding all day are not the same larder - which is the
+    only honest way to ask whether this grid is worth a predator's while.
+    """
+    return sum(_kill_value(c) for c in creatures if c.species == "grazer")
+
+
+def _hunter_migration_chance(creatures: list[Creature]) -> float:
+    """The per-tick chance a hunter walks in from outside, given what is
+    standing on this grid to eat. Zero at or below HUNTER_MIGRATION_HOOF,
+    ramping to the flat HUNTER_MIGRATION_RATE this world has always used once
+    the prey is worth HUNTER_MIGRATION_FULL.
+
+    An empty grid therefore summons nothing whatsoever, which is the case this
+    exists for: a hunter that arrives before the grazers do is fifty energy
+    given to the predator side out of nowhere and spent hunting the single
+    animal keeping this world alive.
+    """
+    hoof = _prey_on_the_hoof(creatures)
+    if hoof <= HUNTER_MIGRATION_HOOF:
+        return 0.0
+    span = max(1, HUNTER_MIGRATION_FULL - HUNTER_MIGRATION_HOOF)
+    return HUNTER_MIGRATION_RATE * min(1.0, (hoof - HUNTER_MIGRATION_HOOF) / span)
 
 
 def _resource_at(resources: list[Resource], x: int, y: int) -> Resource | None:

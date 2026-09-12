@@ -182,6 +182,7 @@
     <span class="swatch"><span class="ring" style="border-color:var(--carrion-inedible);border-style:dotted"></span>hunter remains (crossed out: predators no longer live off their own dead, so this is scenery)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--migrant);border-style:dashed"></span>migrant (just arrived, carries remembered genes)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--migrant);border-style:dotted"></span>the door (pulsing violet, with the absent species' own shape hollow inside it: where the next migrant of a species that has died out here would choose to come in - a grazer wants ground outside every hunter's menace radius and near something to eat, a hunter wants ground about a sense_range from the nearest prey. A real migrant only glances at two dozen tiles, so it lands near here rather than exactly here.)</span>
+    <span class="swatch"><span class="ring" style="border-color:var(--muted)"></span>the latch (a grey bar across the hunter's door: predators are drawn in by prey worth coming for rather than by the calendar, so while the grazers standing here are worth less than the threshold nothing walks in at all - and no single animal, however fat, can open it. The gate widens, brightens and starts pulsing again as the herd fattens toward the full rate.)</span>
   </div>
   <div id="memory"></div>
   <div id="latest-evolve"></div>
@@ -216,6 +217,8 @@ const HUNT_MAX_ENERGY = 70;    // must match HUNT_MAX_ENERGY - ceiling on a sing
 const MAX_MENACE_SPEED = 6;    // only used to normalise how loudly a hunter's menace ring is drawn
 const ARRIVAL_CANDIDATES = 24;   // must match ARRIVAL_CANDIDATES - how many tiles a real migrant actually looks at (the viewer looks at all 1600, so it draws the ideal door and the sim lands near it)
 const ARRIVAL_SAFE_MARGIN = 6;   // must match ARRIVAL_SAFE_MARGIN - clearance past which one safe tile is as good as another
+const HUNTER_MIGRATION_HOOF = 90;  // must match HUNTER_MIGRATION_HOOF - prey worth below which no predator comes at all
+const HUNTER_MIGRATION_FULL = 180; // must match HUNTER_MIGRATION_FULL - prey worth at which they come at the full old rate
 const MOVE_COST = 1;           // must match MOVE_COST in rules/ecosystem.py - energy/tick per point of speed
 const ACUITY_COST = 1;         // must match ACUITY_COST - energy/tick per full point of a hunter's acuity
 const BIRTH_RUNWAY_TICKS = 4;  // must match BIRTH_RUNWAY_TICKS - ticks of its own upkeep a newborn starts with
@@ -281,6 +284,23 @@ function killValue(c) {
 }
 
 const MIN_KILL_VALUE = Math.floor(HUNT_EFFICIENCY * HUNT_FLESH);
+
+// Mirror of _hunter_migration_chance() in rules/ecosystem.py, expressed as a
+// share of the flat rate this world has always used: how strongly the standing
+// prey is currently drawing a predator in from outside. Hunter migration used
+// to be a coin flip that ignored the grid entirely, which is how a hunter
+// walked into an empty world at tick 5643, four ticks before the grazer did.
+// It is the prey on the hoof - head count and condition together, in the
+// predators' own currency - that decides now, so 0 means the door to the
+// hunters is shut and 1 means the herd is as inviting as this world ever gets.
+function hunterDrawShare(creatures) {
+  const hoof = (creatures || [])
+    .filter(c => c.species !== 'hunter')
+    .reduce((sum, c) => sum + killValue(c), 0);
+  if (hoof <= HUNTER_MIGRATION_HOOF) return 0;
+  const span = Math.max(1, HUNTER_MIGRATION_FULL - HUNTER_MIGRATION_HOOF);
+  return Math.min(1, (hoof - HUNTER_MIGRATION_HOOF) / span);
+}
 
 // Chebyshev distance - the box-shaped metric both sense_range and flight use
 // in rules/ecosystem.py. Hoisted to module scope now that the flight rings
@@ -764,23 +784,32 @@ function draw(now) {
   // ground the world is keeping open.
   const arrival = arrivalField(world);
   const doorPulse = 0.5 + 0.5 * Math.sin(now / 700);
+  // ...and whether the hunter's door is open at all. A predator is no longer
+  // called in by the calendar but by the prey standing here (see
+  // _hunter_migration_chance in rules/ecosystem.py): below HUNTER_MIGRATION_HOOF
+  // nothing comes, so the gate stops pulsing, dims to grey and is drawn latched
+  // shut, and it widens and brightens again as the herd fattens toward the full
+  // rate. The grazer's door is unconditional and always drawn open.
+  const drawShare = hunterDrawShare(world.creatures || []);
   for (const species of ['grazer', 'hunter']) {
     const door = arrival.doors[species];
     if (!door) continue;
     const present = (world.creatures || []).some(c =>
       species === 'hunter' ? c.species === 'hunter' : c.species !== 'hunter');
     if (present) continue;
+    const open = species === 'hunter' ? drawShare : 1;
+    const pulse = doorPulse * open;
     const cx = door.x * cell + cell / 2;
     const cy = door.y * cell + cell / 2;
-    ctx.strokeStyle = '#c9b6ff';
-    ctx.globalAlpha = 0.20 + 0.30 * doorPulse;
+    ctx.strokeStyle = open > 0 ? '#c9b6ff' : '#5c7266';
+    ctx.globalAlpha = (0.20 + 0.30 * pulse) * (open > 0 ? 1 : 0.75);
     ctx.lineWidth = Math.max(0.8, cell * 0.05);
-    ctx.setLineDash([cell * 0.16, cell * 0.20]);
+    ctx.setLineDash([cell * (0.16 + 0.22 * open), cell * 0.20]);
     ctx.beginPath();
-    ctx.arc(cx, cy, cell * (0.52 + 0.26 * doorPulse), 0, Math.PI * 2);
+    ctx.arc(cx, cy, cell * (0.52 + 0.26 * pulse), 0, Math.PI * 2);
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.globalAlpha = 0.45 + 0.30 * doorPulse;
+    ctx.globalAlpha = (0.45 + 0.30 * pulse) * (open > 0 ? 1 : 0.55);
     ctx.lineWidth = Math.max(0.6, cell * 0.04);
     ctx.beginPath();
     if (species === 'hunter') {
@@ -793,6 +822,19 @@ function draw(now) {
       ctx.arc(cx, cy, cell * 0.18, 0, Math.PI * 2);
     }
     ctx.stroke();
+    // the latch: a grey bar straight across the hunter's door while the prey
+    // standing here is worth less than a predator's journey. Nothing at all
+    // comes through it until the grazers are worth coming for, and that is the
+    // window a recovering herd has always needed and never had - so it should
+    // be readable at a glance, not inferred from a number.
+    if (species === 'hunter' && open <= 0) {
+      ctx.globalAlpha = 0.45;
+      ctx.lineWidth = Math.max(0.8, cell * 0.055);
+      ctx.beginPath();
+      ctx.moveTo(cx - cell * 0.44, cy);
+      ctx.lineTo(cx + cell * 0.44, cy);
+      ctx.stroke();
+    }
     ctx.globalAlpha = 1;
   }
 
@@ -1225,6 +1267,14 @@ function draw(now) {
     .filter(c => c.species !== 'hunter')
     .reduce((sum, c) => sum + killValue(c), 0);
 
+  // The other thing that same number now decides: whether a predator walks in
+  // from outside at all (see _hunter_migration_chance in rules/ecosystem.py).
+  // Hunter migration used to be a flat coin flip that ignored the grid; it is a
+  // share of that old rate now, ramping from nothing at HUNTER_MIGRATION_HOOF
+  // to all of it at HUNTER_MIGRATION_FULL. "shut" means the prey standing here
+  // is not worth the journey, and no single animal - however fat - can open it.
+  const predatorDraw = hunterDrawShare(creatures);
+
   const carrionList = world.carrion || [];
   const edibleCount = carrionList.filter(edibleCarrion).length;
   const remainsCount = carrionList.length - edibleCount;
@@ -1267,6 +1317,8 @@ function draw(now) {
     `<span>larder <b>${larder}</b></span>` +
     `<span>prey on the hoof <b>${onTheHoof}</b></span>` +
     `<span>safe ground <b>${(arrival.safeFraction * 100).toFixed(0)}%</b></span>` +
+    `<span>predator draw <b>${predatorDraw > 0
+      ? (predatorDraw * 100).toFixed(0) + '%' : 'shut'}</b></span>` +
     `<span>carcasses <b>${edibleCount}</b></span>` +
     `<span>hunter remains <b>${remainsCount}</b></span>`;
 

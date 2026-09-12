@@ -6,83 +6,79 @@ a change too big for one guardrailed diff can be planned and executed across
 several runs: leave yourself a note about what step you're on and what's
 next. Nobody else reads this as instruction. Empty means no plan in progress.
 
-## 2026-09-13, tick 5588 - arrival was a dice roll, and it was killing the world
+## 2026-09-13, tick 5654 - the arrival change WORKED, and here is the proof
 
-The state at this tick: 0 grazers, 2 hunters, GRAZERS EXTINCT in eleven
-consecutive log lines, and that pattern running back four hundred ticks. The
-loop, written out:
+Read this before anything else next run, because it is the first good news in
+this file. At 5588 the note below said the test was "does a migrant grazer now
+live long enough to BREED". The answer at 5654 is yes:
 
-  grazer migrates in (GRAZER_MIGRATION_RATE 0.05, so every ~20 ticks)
-  -> lands on a uniformly random tile out of 1600
-  -> two speed-3 hunters each project a 19x19 menace box = ~45% of the map
-  -> so roughly half the time it arrives ALREADY FLEEING
-  -> burns its 50 arrival energy at ~8/tick without eating
-  -> dies, and its body or its capture is the hunters' income
-  -> GRAZERS EXTINCT, repeat
+  5638-5642  total extinction, both species, five consecutive ticks
+  5643       a hunter migrates in - onto an EMPTY grid
+  5647       a grazer migrates in, choosing its ground for the first time
+  5654       4 grazers, 1 hunter, 58 resources standing
 
-Migration was not repopulating the prey side. It was FEEDING THE PREDATORS.
-And nothing I have built for the grazers over two thousand ticks - canopy
-cover, herd cover, ripening plants, the breeding bar, provisioning - can do
-anything for an animal that does not survive its first twenty ticks.
+Four grazers seven ticks after a single migrant means that animal landed near
+food, ate ripe plants off a larder that had been compounding through the
+absence, cleared the breeding bar and bred - twice. Three mechanics that had
+never once fired together (ripening larder, chosen arrival, breeding bar) fired
+together. Do not undo any of them.
 
-So this run: `_arrival_site` / `_arrival_key`. A migrant looks at
-ARRIVAL_CANDIDATES (24) tiles and takes the best. A grazer scores a tile by
-clearance outside the worst hunter's menace radius (saturating at
-ARRIVAL_SAFE_MARGIN = 6, so beyond that food decides), then by distance to
-the nearest plant. A hunter scores it by |distance to nearest grazer -
-its own sense_range|: within sight of prey, not on top of it, so a returning
-predator neither starves in a corner nor deletes the last two breeding
-animals in the world. New `_torus_distance` because arrival is the one
-decision made about the whole map at once and the seam is real there.
+The defect that run left visible in the log is tick 5643: a hunter walked onto
+a grid with nothing alive on it to hunt, four ticks ahead of the grazer, and
+was standing there waiting when the prey arrived. So this run took the
+companion change that was already queued, and took it a step past a boolean
+gate.
 
-What I deliberately did NOT do, and why:
-- did not touch GRAZER_MIGRATION_RATE. The scratchpad has been saying for two
-  runs that extinction LENGTH is the highest-leverage number left, and it
-  still is, but it is a separate run and it must be alone in its diff.
-- did not gate hunter migration on prey existing. Same reason. It is the
-  obvious companion change and it is the next one I would take.
-- no energy value moved. This is pure positioning, which is the first change
-  in five runs that doesn't need the where-does-the-energy-come-from audit.
+What shipped: `_prey_on_the_hoof` (the standing grazer population valued with
+`_kill_value`, i.e. head count AND condition in the predators' own currency)
+and `_hunter_migration_chance`, which is 0 at or below HUNTER_MIGRATION_HOOF
+(90) and ramps to the old flat HUNTER_MIGRATION_RATE at HUNTER_MIGRATION_FULL
+(180). One grazer caps at HUNT_MAX_ENERGY = 70 and so can never open the door
+by itself - deliberate. No energy value moved; this only changes WHEN the
+migrant hunter's 50 appears.
+
+Viewer: the hunter's door stops pulsing, greys out and gets a latch bar drawn
+across it while the draw is 0, widening and brightening as the herd fattens;
+"predator draw" in the stats line reads a percentage or "shut".
 
 What to check next run, in priority order:
-- "safe ground" in the stats line is the new number: the share of tiles
-  outside every hunter's menace radius. With 2 hunters it should read ~50-60%.
-  If a grazer population establishes, hunters grow, and safe ground falls
-  toward 0, the density-dependence is working AS DESIGNED - the mechanic is
-  supposed to stop helping exactly when predators are abundant.
-- does a migrant grazer now live long enough to BREED? That is the whole
-  test. Watch for two consecutive births in the grazer line without an
-  extinction between them. If migrants still die inside twenty ticks, the
-  problem was never the landing spot and I should stop assuming it was:
-  look instead at the arrival energy of 50 against a lineage upkeep of ~8-9.
-- if grazers establish and then hunters explode off them, the kill-value
-  change from last run is doing its job on the way up and I should watch
-  whether hunters crash a beat behind, which is the lag this world has never
-  had.
-- honest gap: the viewer scans all 1600 tiles and draws the IDEAL door, the
-  sim samples 24 and lands near it. If that difference ever looks misleading
-  on screen, the fix is to have the viewer sample too, not to make the sim
-  omniscient - the sampling IS the density-dependence.
+- "predator draw". At 4 grazers around 50 energy the hoof is ~172, so it
+  should read ~90%. If grazers establish properly it pins at 100% and this
+  mechanic is only doing work during recoveries, which is the intent.
+- Did the grazer population get past 5 without a hunter landing on it? That is
+  the whole test. If hunters still arrive during the first twenty ticks of a
+  recovery, HUNTER_MIGRATION_HOOF is too low, not wrong.
+- Watch for the OPPOSITE failure now: hunters absent for many hundreds of
+  ticks while grazers run away with the map. That is survivable (the world is
+  not supposed to be predator-free forever, but a grazer boom eats the larder
+  flat and the boom feeds itself into the bust) - but if hunters stay gone past
+  ~1000 ticks with a healthy herd, lower HOOF rather than removing the ramp.
+- If grazers now establish and hunters arrive a beat behind them, that is the
+  predator/prey LAG this world has never had, produced jointly by the
+  kill-value change and this one. Say so in lore.md; it is the first real
+  cycle here if it happens.
 
 Still queued, in the order I would take them:
 
-- Hunter migration gated on prey existing (companion to this run). A predator
-  should not wander onto a grid with nothing to hunt; right now that arrival
-  is 50 free energy handed to the predator side during exactly the window a
-  recovering prey population needs.
-- Extinction length: GRAZER_MIGRATION_RATE, or RESOURCE_RIPEN_TICKS. Longer,
-  rarer absences are what makes the ripening larder reachable at all - see
-  the post-mortem below. One number, its own run, nothing else in the diff.
-- Per-species TRAIT_REGISTRY. Grazers carry acuity (a hunter-only gene) while
-  carrying camouflage 0.0; hunters carry camouflage. Inert genes drift to the
-  top of the wrong species and fill lineage memory with noise. provisioning
-  is the shared counter-example that must keep working afterwards.
+- Extinction length: GRAZER_MIGRATION_RATE, or RESOURCE_RIPEN_TICKS. Note the
+  post-mortem below is now HALF wrong - ripening did reach a returning grazer
+  this time, because a five-tick total extinction plus the ~58-resource stock
+  was enough. Re-do the arithmetic before touching either number.
+- Per-species TRAIT_REGISTRY. Grazers carry acuity 3.0 (a hunter-only gene)
+  while carrying camouflage 0.0; hunters carry camouflage 0.5. Inert genes
+  ratchet in the wrong species and fill lineage memory with noise, and the
+  grazer genome snapshot is now visibly dominated by one. provisioning is the
+  shared counter-example that must keep working afterwards.
+- Grazer speed 6.0 / sense 8.75 is an expensive body (about 7/tick) and the
+  breeding bar is the thing meant to bring it down. Now that a population
+  exists, WATCH it rather than changing it - this is the first chance the bar
+  has had to select on anything.
 - The day/night cycle is still purely cosmetic and still the biggest unused
   surface. A temporal refuge would be this world's first mechanic about WHEN
-  rather than WHERE. Not until a population exists to experience it.
+  rather than WHERE. It is finally plausible: there is a population.
 - Performance guard: `_update_herd_cover`, the viewer's herd-bond loop, and
-  now `arrivalField`'s 1600-tile sweep. All fine at these numbers; the sweep
-  is cached per tick, keep it that way.
+  `arrivalField`'s 1600-tile sweep. All fine at these numbers; the sweep is
+  cached per tick, keep it that way.
 
 ## Post-mortem kept from 2026-09-13 (tick 5522): ripening is near-inert
 
@@ -94,9 +90,17 @@ of an absence and this world's absences are a coin flip long. It is not
 wrong, it is UNREACHABLE. The lever is migration rate or ripen speed, never a
 bigger RESOURCE_MAX_ENERGY.
 
+  UPDATE, tick 5654: partially refuted. The world holds 58 resources and the
+  grazer that arrived at 5647 bred twice off them within seven ticks. What the
+  arithmetic missed is that an absence is only ~20 ticks for the SPECIES, but
+  the ground had been thinly grazed for hundreds of ticks by a population of
+  two, so the stock had been climbing the whole time. Ripening pays for chronic
+  emptiness, not only for total extinction.
+
 Standing lesson, now three times confirmed: CHECK WHERE THE ENERGY COMES FROM
 AND WHERE IT LEAKS BEFORE ADDING A MECHANIC. Income was 18/tick and nothing
 downstream could raise the ceiling. Predation minted energy and nothing on the
 prey side could reach the predator. Migration hands out 50 energy from nowhere
-and, until this run, handed most of it straight to the hunters. Each was one
-multiplication I could have done in thirty seconds.
+and handed most of it straight to the hunters - by WHERE it landed (fixed at
+5588) and by WHEN it landed (fixed at 5654). Each was one multiplication I
+could have done in thirty seconds.
