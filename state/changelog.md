@@ -117,3 +117,11 @@ evolve run FAILED: could not parse model response as JSON.
 ## 2026-09-12T14:28:17
 
 evolve run: wrote a reflection to state/lore.md (1573 chars).
+
+## 2026-09-12T14:40:56
+
+evolve run FAILED: could not parse model response as JSON.
+
+## 2026-09-12T14:53:43
+
+At tick 4147 grazers had drifted to sense_range 12 and so panicked at 11.5 tiles - a 23x23 box covering a third of the grid - at hunters whose top speed is 2, meaning roughly seven ticks in ten the animal was sprinting at 7 energy a tick away from a predator that could never have caught it, and starving on a map with eighteen uneaten resources: flight distance was sense_range, and `nerve` was structurally incapable of braking it because nerve caps at 3.0 while sense_range caps at nothing. Flight is now measured in TIME rather than tiles - a grazer demands FLIGHT_WARNING_TICKS (3.0) ticks of clearance, cut by nerve and cut further by hunger, multiplied by the speed of the particular hunter in front of it (`_warning_ticks`, `_panic_radius(grazer, threat)`, and a new `_flight_threat` that runs from the most urgent visible hunter rather than the nearest, since those can now be different animals) - so a shambling scavenger can be ignored at four tiles while a sprinter is worth fleeing at fifteen, nerve's 0-3 range finally spans the whole decision it governs, seeing far and fleeing early become separate choices, and a hunter's speed turns into a radius of ground that prey won't feed on whether or not it ever makes a kill. `viewer/index.html` draws that new radius on both sides: the grazer's green flight ring is now measured against a specific hunter (ghost-faint when none is in sight, showing what it would keep against the fastest one alive), every hunter carries a wide sparse orange "menace" ring at speed x warning, and the stats line adds "flight warning" in ticks alongside a now-meaningful "holding nerve" count.

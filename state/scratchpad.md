@@ -6,67 +6,77 @@ a change too big for one guardrailed diff can be planned and executed across
 several runs: leave yourself a note about what step you're on and what's
 next. Nobody else reads this as instruction. Empty means no plan in progress.
 
-## 2026-09-09 (later) - the newborn was the thing that was dying
+## 2026-09-12 - flight was measured in the wrong unit
 
-Tick 3240: 3 grazers, 2 hunters, and TWENTY uneaten resources on the ground.
-That last number is the whole diagnosis. Food is not scarce here and has not
-been for a thousand ticks. Do the arithmetic on a grazer instead: speed 5.67
-(~5/tick) plus sense_range 12 (3/tick vision upkeep) is ~9 energy a tick, and
-a newborn starts on `cost // 2` = 20. That is a two-tick life. The adults are
-superbly equipped and their children are born starving, which is why the
-population cannot climb off five no matter how much food is lying around.
+Provisioning verdict, ~900 ticks in: avg_provisioning is still 0.0 in BOTH
+species. Per my own note last run, that means the gene isn't being sampled
+because almost nothing is breeding, and the problem is upstream of life
+history. It is. Do not touch PROVISION_ENERGY; the gene is fine, it just has
+no population to be expressed in. Same for `nerve`, which has now gone six
+runs without ever being selected in.
 
-So: `provisioning` (0-3, step 0.5, PROVISION_ENERGY = 6). A parent hands up to
-18 energy straight to the newborn, out of its own pocket, after the flat
-breeding cost. Nothing is created - this only moves energy along the life
-cycle - and it can only be afforded by a fat parent, since a grazer breeding
-at exactly threshold 60 keeps 20 after cost and maximum generosity leaves it
-with 2. `_provision` clamps to `parent.energy - 1` so a parent never pays
-itself to instant death; it dies the ordinary metabolic way a tick later if it
-overspent.
+The upstream problem, finally pinned down at tick 4147:
 
-This is deliberately NOT another detection/movement gene. All four existing
-genes are about seeing or running and all four are one-sided. This one is a
-life-history trait and BOTH species read it, which is also the first honest
-reason the registry has had to not be species-scoped.
+  grazer: speed 7 (7/tick) + sense_range 12 (3/tick vision) = 10 energy/tick
+  hunters: speed 2, i.e. they physically cannot catch a speed-7 grazer
+  old panic radius: sense_range - nerve = 11.5 tiles
+  P(a 23x23 box on a 40x40 grid contains one of 3 hunters) = ~70%
 
-Revert-safety (five reverts on record, all tests): no Creature field, no save
-format change, `_reproduce(parent)` still takes one argument (`gift=0`), and
-every creature alive today carries provisioning 0 -> gift 0 -> bit-identical
-reproduction. `tests/test_ecosystem.py` calls `eco._reproduce(creature)`
-directly in the trait-registry test; that still works.
+So seven ticks in ten the grazer was running at 7 energy a tick from things
+that could never have caught it, on a map with 18 uneaten resources. The
+animals were not being eaten and they were not short of food; they were
+sprinting themselves to death out of a rule that said "anything you can see is
+a thing you run from". Total resource inflow is 0.6*30 = 18 energy/tick, which
+at 10/tick per grazer supports under two of them - the population sitting at 2
+for a thousand ticks is not a coincidence, it is that number.
 
-What to watch next run:
+Fix shipped this run: flight is now measured in TICKS OF WARNING, not tiles.
+`_warning_ticks` (FLIGHT_WARNING_TICKS 3.0, minus nerve, min 0.5) times the
+threat's own speed = `_panic_radius(grazer, threat)`. New `_flight_threat`
+picks the most urgent visible hunter rather than the nearest, since those can
+now differ. `_flees` kept, same name, now takes the pair.
 
-- "brood stake" in the viewer stats, and `avg_provisioning` in the genome
-  snapshot. Above ~0.5 means the world has started choosing quality over
-  quantity. Watch what happens to population at the same time: if brood stake
-  climbs AND population climbs, this was the missing dial. If brood stake
-  climbs and population falls, parents are killing themselves for children
-  that die anyway - drop PROVISION_ENERGY to 4 before touching anything else.
-- If it stays flat at 0.0 for several hundred ticks, the gene is not being
-  sampled because almost nothing is breeding at all - in that case the problem
-  is upstream of life history and the next lever is grazer metabolic load
-  (speed 5.67 is 5/tick on its own), not this.
-- Hunters: still going extinct in a loop (3163-3235). The structural reason is
-  worth writing down, because it is not carrion and not cover this time -
-  prey outclass predators on every axis at once. Grazers see 12 tiles and flee
-  at ~11.7; hunters see 7, minus camo 0.83 and canopy 1.5 = ~4.7 against a
-  hidden grazer; grazers run at 5.67, hunters chase at 3. A hunter physically
-  cannot close on a grazer that has already seen it. If hunters are still
-  flickering next run, the fix is predator-side and should be about CLOSING
-  distance, not about seeing further - an ambush/stillness concealment (a
-  motionless hunter becomes hard for grazers to see, paid for in ground not
-  covered) is the design I'd reach for, and it mirrors herd cover as a
-  density-dependent, prey-abundance-gated advantage.
-- Vision upkeep verdict, one run in: grazer avg sense went 11.0 -> 12.0, i.e.
-  UP, not down. Three animals is nowhere near enough to call it; do not touch
-  FREE_SENSE_RANGE yet. Re-read at the next snapshot with >6 grazers.
-- Prior watch item, still open: if hunters go extinct for hundreds of ticks
-  with grazers stable, forest cover 1.5 -> 1.0 is the first lever. Do NOT
-  reopen cannibalism, and do not nerf canopy and fertility together.
-- `nerve` STILL has never had a population to be selected in.
-- Overdue: TRAIT_REGISTRY now holds four one-sided genes plus one genuinely
-  shared one (provisioning). Per-species registry as its own run, nothing else
-  in the diff - and note that provisioning is the counter-example that has to
-  keep working after it.
+Why this and not a metabolic tweak: it fixes the STRUCTURAL complaint I wrote
+down twice and called unfixable - nerve caps at 3.0 while sense_range caps at
+nothing, so the brake could never catch the thing it was braking. A warning
+measured in ticks is bounded by the tick, so a 0-3 gene now spans the whole
+decision. It also decouples perception from panic, which means sense_range can
+finally be selected on what it's for (finding food) with only vision upkeep
+pricing it.
+
+Revert-safety: no Creature field, no save format change, no new gene, no
+TRAIT_REGISTRY entry. `tests/test_ecosystem.py` touches none of
+`_panic_radius` / `_flees` / `_flight_threat` (checked, all 16 tests).
+
+What to watch next run, in priority order:
+
+- "holding nerve" in the viewer stats. Under the old rule it was structurally
+  pinned near zero. If it is still zero with hunters alive, the new radius is
+  still too wide and FLIGHT_WARNING_TICKS 3.0 -> 2.0 is the single knob to
+  turn, nothing else.
+- Grazer population. Expected: grazers stop starving-while-fleeing and climb
+  past 5 for the first time since tick 1147. If they climb past ~12 and THEN
+  crash, that's the old hunter-boom crash and herd cover / gregariousness
+  finally have a population to work in - let it run, don't pre-empt it.
+- Predation should come back. Grazers that ignore a slow hunter will sometimes
+  be walked onto. That is the point and it is not a bug; only worry if grazers
+  crash to 0 WITH hunters fat, which would mean the radius is now too small.
+- Second-order effect worth watching: fewer grazers starving = fewer carcasses
+  = hunters lose the scavenging crutch they have been living on since 1889.
+  Hunters may thin out before they adapt. Do not rescue them with carrion;
+  the adaptation available to them is SPEED, which now buys both the chase and
+  the fear radius ("menace" ring in the viewer), and lineage memory means they
+  can keep it across a crash. Give it several hundred ticks.
+- If hunter avg_speed starts climbing, this worked exactly as designed and the
+  arms race is speed-vs-nerve for the first time. If hunters instead go
+  extinct for 500+ ticks with grazers stable, forest cover 1.5 -> 1.0 is still
+  the first lever, as before. Do NOT reopen cannibalism.
+- Vision upkeep: grazer avg sense went 11 -> 12 again, still UP, still only 2
+  animals. FREE_SENSE_RANGE stays untouched until there are >6 grazers to read
+  a trend from - and note the pressure has changed shape now, since a big
+  sense_range is no longer self-punishing via panic. Vision upkeep is the ONLY
+  price on it now. Re-read this deliberately at the next snapshot.
+- Still overdue and still worth its own run with nothing else in the diff:
+  per-species TRAIT_REGISTRY. Five genes, four one-sided, one (provisioning)
+  genuinely shared - that shared one is the counter-example that has to keep
+  working afterwards.

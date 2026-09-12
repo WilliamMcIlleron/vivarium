@@ -159,13 +159,14 @@
     <span class="swatch"><span class="dot" style="background:var(--creature-high)"></span>grazer (brighter = more energy, fainter = more camouflage or deeper in cover)</span>
     <span class="swatch"><span class="speck"></span>canopy (forest: the only ground that hides a grazer from hunters - and almost nothing grows under it)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--vision);border-style:dashed"></span>perception (how far this animal can actually see - free out to 6 tiles, then one spoke on the ring for every energy/tick it burns keeping the extra horizon)</span>
-    <span class="swatch"><span class="ring" style="border-color:var(--creature-high)"></span>flight distance (the bubble a grazer keeps clear of hunters - nerve shrinks it, so the gap in from the blue perception ring is exactly how much nerve this animal has)</span>
+    <span class="swatch"><span class="ring" style="border-color:var(--creature-high)"></span>flight distance (the ground a grazer keeps between itself and one particular hunter: a few ticks of warning times that hunter's speed, so it is tight around a slow predator and enormous around a fast one - a ghost-faint ring means nothing is in sight and this is what it would keep)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--resource);border-style:dashed"></span>hungry nerve (amber: this grazer is starving and letting hunters come closer than it otherwise would)</span>
     <span class="swatch"><span class="bar" style="background:var(--creature-high)"></span>herd bond (linked grazers are harder for a hunter to single out - brighter = deeper cover)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--creature-high);border-style:dotted"></span>gregariousness (how strongly a grazer walks to company instead of food)</span>
     <span class="swatch"><span class="core"></span>provisioning (the rose core, on either species: how much of itself this animal pours into each newborn instead of its own survival - no energy is created, it only moves down a generation)</span>
     <span class="swatch"><span class="tri" style="border-bottom-color:var(--hunter-high)"></span>hunter (brighter = more energy)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--hunter-high)"></span>acuity (rings around a hunter - sees through camouflage, herds and canopy, costs energy every tick)</span>
+    <span class="swatch"><span class="ring" style="border-color:var(--hunter-high);border-style:dashed"></span>menace (the wide sparse ring: how much ground this hunter's speed alone clears of feeding grazers, whether or not it ever catches one)</span>
     <span class="swatch"><span class="dot" style="background:var(--resource)"></span>resource (grows where light reaches the ground, so it clusters in the open)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--carrion)"></span>carcass (a grazer's body - the only carrion a hunter can eat; fades as it rots)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--carrion-inedible);border-style:dotted"></span>hunter remains (crossed out: predators no longer live off their own dead, so this is scenery)</span>
@@ -186,6 +187,8 @@ const HERD_RADIUS = 2;         // must match HERD_RADIUS in rules/ecosystem.py -
 const HERD_COVER_MAX = 2;      // must match HERD_COVER_MAX - only used to normalise the bond brightness
 const NERVE_HUNGER_LEVEL = 25; // must match NERVE_HUNGER_LEVEL in rules/ecosystem.py
 const NERVE_HUNGER_BOOST = 1.5;// must match NERVE_HUNGER_BOOST
+const FLIGHT_WARNING_TICKS = 3;  // must match FLIGHT_WARNING_TICKS - ticks of clearance a nerveless grazer demands
+const FLIGHT_MIN_WARNING = 0.5;  // must match FLIGHT_MIN_WARNING
 const TERRAIN_COVER = { f: 1.5, g: 0, s: 0, w: 0 }; // must match TERRAIN_COVER - how much a tile hides a grazer
 const MAX_COVER = 1.5;         // the largest value in TERRAIN_COVER, for normalising
 const FREE_SENSE_RANGE = 6;    // must match FREE_SENSE_RANGE in rules/ecosystem.py - horizon that costs nothing
@@ -193,6 +196,7 @@ const SENSE_COST_STEP = 2;     // must match SENSE_COST_STEP - tiles of extra ho
 const SENSE_COST = 1;          // must match SENSE_COST - energy/tick per step of extra horizon
 const MAX_VISION_COST = 4;     // only used to normalise the perception ring's brightness
 const PROVISION_ENERGY = 6;    // must match PROVISION_ENERGY in rules/ecosystem.py - energy a parent hands a newborn per point of provisioning
+const MAX_MENACE_SPEED = 6;    // only used to normalise how loudly a hunter's menace ring is drawn
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 const stats = document.getElementById('stats');
@@ -226,19 +230,53 @@ function coverAt(terrain, x, y) {
   return TERRAIN_COVER[row[x]] || 0;
 }
 
-// Mirror of _panic_radius() in rules/ecosystem.py: how close a hunter has to
-// get before this grazer stops feeding and runs. Kept in sync by hand - it's
-// two lines, and the alternative is the sim exporting a derived number it
-// doesn't itself need to store.
-function panicRadius(c) {
+// Chebyshev distance - the box-shaped metric both sense_range and flight use
+// in rules/ecosystem.py. Hoisted to module scope now that the flight rings
+// need it while drawing and not just in the stats line.
+const chebyshev = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
+
+// Mirrors of _warning_ticks() and _panic_radius() in rules/ecosystem.py.
+// Flight is no longer a distance a grazer owns by itself: it demands a few
+// TICKS of clearance, cut by nerve and cut further by hunger, and how many
+// tiles that buys depends entirely on how fast the particular hunter in front
+// of it moves. Kept in sync by hand - it's four lines, and the alternative is
+// the sim exporting a derived number it doesn't itself store.
+function warningTicks(c) {
   let nerve = (c.traits && c.traits.nerve) || 0;
   if ((c.energy ?? 0) < NERVE_HUNGER_LEVEL) nerve *= NERVE_HUNGER_BOOST;
-  return Math.max(1, (c.sense_range || 0) - nerve);
+  return Math.max(FLIGHT_MIN_WARNING, FLIGHT_WARNING_TICKS - nerve);
+}
+
+function panicRadius(c, threat) {
+  if (!threat) return 0;
+  return Math.max(1, Math.max(1, threat.speed || 0) * warningTicks(c));
+}
+
+// Which hunter a grazer's flight ring should be measured against: the most
+// urgent one it can actually see - furthest inside the panic radius that
+// hunter personally earns, which is NOT necessarily the nearest any more -
+// or, when nothing is in sight, the fastest hunter alive, drawn as a ghost of
+// the ring it would keep if that one walked into view. Null when the world
+// holds no hunters at all and there is nothing to be afraid of.
+function flightReference(c, creatures) {
+  const hunters = creatures.filter(h => h.species === 'hunter');
+  if (!hunters.length) return null;
+  let worst = null;
+  let urgency = -Infinity;
+  for (const h of hunters) {
+    const d = chebyshev(h, c);
+    if (d > (c.sense_range || 0)) continue;
+    const u = panicRadius(c, h) - d;
+    if (u >= 0 && u > urgency) { worst = h; urgency = u; }
+  }
+  if (worst) return { threat: worst, seen: true };
+  const fastest = hunters.reduce((a, b) => ((a.speed || 0) >= (b.speed || 0) ? a : b));
+  return { threat: fastest, seen: false };
 }
 
 // Mirror of _vision_cost() in rules/ecosystem.py: the energy this creature
 // burns every tick just for being able to see as far as it does. Derived from
-// sense_range rather than stored, same as the panic radius above.
+// sense_range rather than stored, same as the flight radius above.
 function visionCost(c) {
   const excess = (c.sense_range || 0) - FREE_SENSE_RANGE;
   if (excess <= 0) return 0;
@@ -470,7 +508,9 @@ async function fetchLatestLore() {
 // Each species is shown with the genes it actually uses: concealment
 // (camouflage), sociability (gregariousness) and composure (nerve) for
 // grazers, acuity for hunters - plus brood investment (provisioning), which
-// is the one gene both of them read.
+// is the one gene both of them read. A hunter's remembered SPEED is worth
+// reading twice now: it is both how fast the next one will chase and how much
+// ground it will scare prey off without chasing anything at all.
 function bloodline(records, genes) {
   if (!records || !records.length) return 'nothing remembered';
   const avg = key => records.reduce((sum, g) => sum + (g[key] || 0), 0) / records.length;
@@ -548,19 +588,17 @@ function draw(now) {
   // perception: the ring at a creature's actual sense_range - everything it
   // can see, prey, predators, food and bodies alike. Drawn for both species
   // in cool blue so it never reads as one of the green prey-side or orange
-  // predator-side markings, and drawn OUTSIDE the green flight bubble below,
-  // because that is the relationship worth seeing: the outer ring is what the
-  // animal perceives, the inner one is what it will actually run from, and
-  // the gap between them is its nerve.
+  // predator-side markings. It used to double as the grazer's flight
+  // distance; as of this run it does not, and that separation is the thing to
+  // watch here - the blue ring is now purely what the animal KNOWS about,
+  // while the green ring inside it is the much smaller patch of ground it is
+  // actually willing to fight for.
   //
-  // As of this run the ring is also a bill. Sight beyond FREE_SENSE_RANGE
-  // costs energy every single tick (see _vision_cost in rules/ecosystem.py),
-  // so the ring brightens and thickens with what it costs, and carries one
-  // short radial spoke for every energy/tick the animal is paying. A creature
-  // living inside the free allowance has a bare, almost invisible ring; a
-  // grazer that has drifted out to sense_range 11 wears a wide spoked ring
-  // and is paying for every tile of it whether or not it ever finds anything
-  // out there.
+  // The ring is also a bill. Sight beyond FREE_SENSE_RANGE costs energy every
+  // single tick (see _vision_cost in rules/ecosystem.py), so the ring
+  // brightens and thickens with what it costs, and carries one short radial
+  // spoke for every energy/tick the animal is paying. A creature living
+  // inside the free allowance has a bare, almost invisible ring.
   for (const c of creatures) {
     const range = c.sense_range || 0;
     if (range <= 0) continue;
@@ -594,25 +632,57 @@ function draw(now) {
     ctx.globalAlpha = 1;
   }
 
-  // flight distance: the bubble of ground a grazer insists on keeping clear
-  // of hunters (see _panic_radius in rules/ecosystem.py). A grazer sees a
-  // predator out to its full sense_range - the blue ring above - but only
-  // bolts once one crosses this one, so the two together are the single most
-  // important invisible number in the world made visible. A wide ring is a
-  // jumpy animal that spends its life running and starves doing it; a tight
-  // ring is one holding its nerve over a meal. The ring turns amber and
-  // dashed when hunger is what's shrinking it, because a starving grazer
-  // takes risks a fed one wouldn't.
+  // menace: the predator's half of the new flight rule. A grazer's flight
+  // distance is this hunter's speed multiplied by the warning the grazer
+  // demands (see _panic_radius in rules/ecosystem.py), so every hunter now
+  // carries a radius of ground that a nerveless grazer will not stand and
+  // feed on while it is there - its reputation, measured in tiles. A slow
+  // hunter's is small and it can amble almost up to a feeding animal; a fast
+  // one clears the larder around itself without ever making a kill, which is
+  // a way of starving prey that this world has never had before. Drawn as a
+  // wide, sparsely dashed orange ring so it reads as something the hunter
+  // projects outward, quite unlike the tight solid acuity rings it wears.
   for (const c of creatures) {
-    if (c.species === 'hunter') continue;
-    const radius = panicRadius(c);
-    const hungry = (c.energy ?? 0) < NERVE_HUNGER_LEVEL;
-    const held = Math.max(0, Math.min(1, ((c.sense_range || 0) - radius) / MAX_TRAIT));
+    if (c.species !== 'hunter') continue;
+    const radius = Math.max(1, c.speed || 0) * FLIGHT_WARNING_TICKS;
+    const menace = Math.max(0, Math.min(1, (c.speed || 0) / MAX_MENACE_SPEED));
     const cx = c.drawX * cell + cell / 2;
     const cy = c.drawY * cell + cell / 2;
-    ctx.globalAlpha = c.alpha * (0.09 + 0.20 * held);
+    ctx.globalAlpha = c.alpha * (0.07 + 0.17 * menace);
+    ctx.strokeStyle = '#ff8f6b';
+    ctx.lineWidth = Math.max(0.6, cell * (0.02 + 0.03 * menace));
+    ctx.setLineDash([cell * 0.7, cell * 0.9]);
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius * cell, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+  }
+
+  // flight distance: the ground a grazer insists on keeping between itself
+  // and ONE PARTICULAR hunter (see _panic_radius in rules/ecosystem.py). It
+  // is no longer a property of the prey alone and no longer a copy of the
+  // blue perception ring - it is how far that predator travels in the few
+  // ticks of warning this animal demands, so the same grazer wears a tight
+  // ring beside a shambling scavenger and an enormous one beside a sprinter.
+  // Solid when the hunter it is measured against is actually in sight; a
+  // ghost-faint ring otherwise, showing what it would keep clear if the
+  // fastest hunter alive walked into view. Amber and dashed when hunger is
+  // what's shrinking it, because a starving grazer takes risks a fed one
+  // wouldn't.
+  for (const c of creatures) {
+    if (c.species === 'hunter') continue;
+    const ref = flightReference(c, creatures);
+    if (!ref) continue;
+    const radius = panicRadius(c, ref.threat);
+    const hungry = (c.energy ?? 0) < NERVE_HUNGER_LEVEL;
+    const held = Math.max(0, Math.min(1,
+      (FLIGHT_WARNING_TICKS - warningTicks(c)) / FLIGHT_WARNING_TICKS));
+    const cx = c.drawX * cell + cell / 2;
+    const cy = c.drawY * cell + cell / 2;
+    ctx.globalAlpha = c.alpha * (ref.seen ? 0.14 + 0.28 * held : 0.05 + 0.07 * held);
     ctx.strokeStyle = hungry ? '#e8c07d' : '#9fffc4';
-    ctx.lineWidth = Math.max(0.6, cell * 0.025);
+    ctx.lineWidth = Math.max(0.6, cell * (ref.seen ? 0.035 : 0.02));
     if (hungry) ctx.setLineDash([cell * 0.22, cell * 0.22]);
     ctx.beginPath();
     ctx.arc(cx, cy, radius * cell, 0, Math.PI * 2);
@@ -818,10 +888,9 @@ function draw(now) {
   ).length;
 
   // What the population is spending, per tick, just on being able to see far
-  // (see FREE_SENSE_RANGE in rules/ecosystem.py). This is the number the
-  // price of perception exists to move: sense_range used to be free and had
-  // drifted to an average of 11, so if this total falls over the coming
-  // hundreds of ticks while the population holds, the ceiling is working.
+  // (see FREE_SENSE_RANGE in rules/ecosystem.py). Worth reading alongside the
+  // flight warning below: a long horizon no longer drags flight distance up
+  // with it, so this is now the only thing a far-sighted lineage pays.
   const visionUpkeep = creatures.reduce((sum, c) => sum + visionCost(c), 0);
 
   // The average head start a newborn is being handed here, on top of the flat
@@ -842,18 +911,26 @@ function draw(now) {
   const remainsCount = carrionList.length - edibleCount;
 
   // Grazers that can currently see a hunter and are choosing to keep feeding
-  // anyway - i.e. a predator inside sense_range but outside the flight ring.
-  // This is the number the nerve gene exists to move: when it's above zero,
-  // something out there is eating with a hunter in view instead of running
-  // itself to death.
-  const chebyshev = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
+  // anyway - a predator inside sense_range but outside the flight ring THAT
+  // predator earns. This is the number the new flight rule exists to move:
+  // under the old distance rule a grazer with sense_range 12 panicked at 11.5
+  // tiles at hunters whose top speed was 2, so it was almost always zero and
+  // the animals starved while sprinting. It should now spend most of its time
+  // above zero.
   const nerveCount = creatures.filter(c => {
     if (c.species === 'hunter') return false;
-    const radius = panicRadius(c);
     return creatures.some(h => h.species === 'hunter'
       && chebyshev(h, c) <= (c.sense_range || 0)
-      && chebyshev(h, c) > radius);
+      && chebyshev(h, c) > panicRadius(c, h));
   }).length;
+
+  // How much warning, in ticks, this population's grazers insist on before
+  // they give up a meal and run. FLIGHT_WARNING_TICKS is the nerveless
+  // default; every step below it is nerve, or hunger, being selected for.
+  const grazersHere = creatures.filter(c => c.species !== 'hunter');
+  const warnAvg = grazersHere.length
+    ? grazersHere.reduce((sum, c) => sum + warningTicks(c), 0) / grazersHere.length
+    : 0;
 
   stats.innerHTML =
     `tick <b>${world.tick}</b>` +
@@ -862,6 +939,7 @@ function draw(now) {
     `<span>in a herd <b>${herdedCount}</b></span>` +
     `<span>under canopy <b>${shelteredCount}</b></span>` +
     `<span>holding nerve <b>${nerveCount}</b></span>` +
+    `<span>flight warning <b>${warnAvg.toFixed(1)}</b> ticks</span>` +
     `<span>vision upkeep <b>${visionUpkeep}</b>/tick</span>` +
     `<span>brood stake <b>${broodAvg.toFixed(1)}</b></span>` +
     `<span>resources <b>${(world.resources || []).length}</b></span>` +
