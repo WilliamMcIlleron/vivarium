@@ -38,12 +38,12 @@ distance was simply sense_range. When it does run, it runs for the trees
 rather than in a straight line (see _move_away).
 
 Nothing about a body here is free. Speed costs energy every tick (MOVE_COST),
-a hunter's acuity costs energy every tick (ACUITY_COST), and as of this run so
-does the horizon itself (see FREE_SENSE_RANGE): eyes out to the species
-baseline are part of the animal, and every couple of tiles of sight beyond
-that is paid for forever, whether or not they ever find anything. An unpriced
-gene does not find an optimum - it only ratchets - and sense_range was the
-last one in this world that had no price at all.
+a hunter's acuity costs energy every tick (ACUITY_COST), and so does the
+horizon itself (see FREE_SENSE_RANGE): eyes out to the species baseline are
+part of the animal, and every couple of tiles of sight beyond that is paid for
+forever, whether or not they ever find anything. An unpriced gene does not
+find an optimum - it only ratchets. The whole of that per-tick bill lives in
+one place, `_upkeep`.
 
 Bodies are not the only thing a genome decides here. `provisioning` is this
 world's first life-history gene: it sets how much of a parent's own energy
@@ -52,6 +52,18 @@ PROVISION_ENERGY). It creates nothing - every point the child starts with is a
 point the parent no longer has - and it is the only gene in the registry that
 both species read for the same reason, because "many cheap offspring or few
 expensive ones" is a question a predator faces exactly as squarely as its prey.
+
+Reproduction, as of this run, is priced by the body too. A newborn used to be
+handed a flat `cost // 2` whatever it was going to be, so breeding a speed-7
+grazer with a twelve-tile horizon cost precisely what breeding a speed-1 one
+did - even though the first child burns its whole endowment in two ticks and
+the second lives twenty on it. A newborn is now sent out with
+BIRTH_RUNWAY_TICKS ticks of its own upkeep (`_birth_weight`), floored at that
+old flat number, and the difference is raised by the parent BEFORE it is
+allowed to breed at all (`_breeding_bar`). An expensive genome therefore has a
+higher bar to clear every single generation, which puts selection on
+metabolism at the reproductive bottleneck instead of only in slow attrition -
+the one place it can still act in a population of two.
 
 Anything that dies of starvation or old age leaves a Carrion behind: a static,
 rotting carcass. It is the only food a hunter can get without catching
@@ -266,8 +278,47 @@ REPRODUCE = {
     "hunter": {"threshold": 110, "cost": 55},
 }
 
+# How many ticks of its own upkeep a newborn is sent into the world with.
+#
+# The flat `cost // 2` endowment was written when a grazer cost 1 energy a
+# tick, and 20 energy was a twenty-tick childhood. The grazers this world
+# actually produces now run at speed 6 with a twelve-tile horizon - 9 energy a
+# tick - so the same 20 is a two-tick childhood on a 1600-tile grid. Tick 4209
+# is roughly the thousandth in a row where a population sitting on twenty
+# uneaten resources could not put a child far enough to reach one.
+# PROVISION_ENERGY was added at tick 3240 to let a parent fix that
+# voluntarily, and nine hundred ticks later `provisioning` is still 0.0 in
+# both species: a gene needs a population to be sampled in, and there isn't
+# one.
+#
+# So the endowment is no longer a constant, it is a runway: a newborn starts
+# with BIRTH_RUNWAY_TICKS ticks of whatever body it inherited, floored at the
+# old `cost // 2` so nothing cheap changes at all. The important half is who
+# pays for it. The parent raises the difference BEFORE it is allowed to breed
+# (see _breeding_bar), so an expensive animal's threshold rises with its own
+# metabolism - a speed-6, sense-12 grazer must reach 76 instead of 60, while a
+# speed-1 grazer breeds at 60 exactly as it always did - and what the parent
+# is left holding afterwards is identical either way.
+#
+# That is the whole point. Every price this world has put on a gene so far has
+# been charged per tick, and a per-tick charge only selects through attrition;
+# attrition needs a population large enough that the merely inefficient
+# outnumber the unlucky. This one is charged at the reproductive bottleneck,
+# where it bites within a single generation, which is the only timescale a
+# world holding two animals has. It creates no energy and destroys none: a
+# cheap lineage is bit-for-bit unaffected, and an expensive one simply has to
+# be fatter before it may have a child.
+#
+# The feedback it sets up is density-dependent, which is what makes it an
+# ecology rather than a nerf. After a crash, uneaten resources pile up, and
+# even an expensive migrant can clear the higher bar - so the remembered
+# bloodline still gets its chance to breed. As the population recovers and the
+# larder thins, the bar is what decides who keeps breeding, and that is the
+# cheap animal every time.
+BIRTH_RUNWAY_TICKS = 4
+
 # Parental provisioning: extra energy a parent hands to its newborn, on top of
-# the standard `cost // 2` endowment, per point of the `provisioning` gene.
+# the standard endowment, per point of the `provisioning` gene.
 #
 # Tick 3240 is the argument for this. The world holds 3 grazers, 2 hunters and
 # twenty uneaten resources lying on the ground - food is not what is missing.
@@ -296,6 +347,11 @@ REPRODUCE = {
 # out of the parent's future, never out of an instant suicide. Whether this
 # world chooses a few well-stocked young or a great many doomed ones is the
 # entire point of adding it.
+#
+# Note how it now relates to BIRTH_RUNWAY_TICKS above: the runway is the
+# minimum every child is owed and the parent must have saved up for, while
+# provisioning is what a parent chooses to add on top of that floor. One is
+# the law, the other is generosity.
 PROVISION_ENERGY = 6
 
 # If either species dies out entirely, a small per-tick chance of one
@@ -620,23 +676,14 @@ class World:
                         _move_toward(creature, target)
                     else:
                         _move_random(creature)
-            # Cost scales with the creature's own speed gene (see MOVE_COST
-            # above) - being fast is a real metabolic expense now, not a
-            # stat with only upside.
-            creature.energy -= MOVE_COST * creature.speed
-            # And every creature pays upkeep on its eyes, every tick, whether
-            # or not they found anything (see FREE_SENSE_RANGE). Charged to
-            # both species, unlike acuity: sense_range is the one gene a
-            # grazer and a hunter both actually read, so both are billed for
-            # it. A creature at or below the free allowance pays nothing and
-            # behaves exactly as it did before this existed.
-            creature.energy -= _vision_cost(creature)
-            # And a hunter pays for its eyes every tick whether or not they
-            # found anything (see ACUITY_COST). Charged only to hunters, since
-            # a grazer's inherited acuity is inert - it should not be billed
-            # for a sense it never uses.
-            if creature.species == "hunter":
-                creature.energy -= int(ACUITY_COST * creature.trait("acuity"))
+            # The entire per-tick bill for being this animal - its speed
+            # (MOVE_COST), its horizon (FREE_SENSE_RANGE) and, for a hunter,
+            # its acuity (ACUITY_COST) - charged in one place and
+            # arithmetically identical to the three separate deductions it
+            # replaces. It lives in _upkeep now because reproduction reads the
+            # same number: what a body costs to run is what it costs to start
+            # (see _birth_weight).
+            creature.energy -= _upkeep(creature)
 
         # hunting: a hunter co-located with a still-living grazer eats it.
         # Checked after all movement resolves, so this reflects end-of-tick
@@ -687,19 +734,24 @@ class World:
                 continue
 
             repro = REPRODUCE[creature.species]
-            if creature.energy >= repro["threshold"]:
-                creature.energy -= repro["cost"]
-                # Life history: on top of the flat cost of breeding, the
-                # parent decides how much of what's left it hands straight to
-                # the newborn (see PROVISION_ENERGY). Nothing is created here
-                # - every point the child starts with is a point the parent
-                # is now short, and it comes out of the parent's own chances
-                # of surviving to breed again. At provisioning 0, which is
-                # what every creature in this world carries today, the gift is
-                # zero and this tick is bit-for-bit what it always was.
+            # The bar is no longer the same for everybody. An animal has to be
+            # able to afford the runway its child will need (see
+            # BIRTH_RUNWAY_TICKS), which for an expensive body means reaching a
+            # higher number before it may breed at all - and for a cheap one
+            # means exactly the species threshold it always was.
+            if creature.energy >= _breeding_bar(creature):
+                endowment = _birth_weight(creature)
+                creature.energy -= repro["cost"] + endowment - repro["cost"] // 2
+                # Life history: on top of the cost of breeding, the parent
+                # decides how much of what's left it hands straight to the
+                # newborn (see PROVISION_ENERGY). Nothing is created here -
+                # every point the child starts with is a point the parent is
+                # now short, and it comes out of the parent's own chances of
+                # surviving to breed again. At provisioning 0, which is what
+                # every creature in this world carries today, the gift is zero.
                 gift = _provision(creature)
                 creature.energy -= gift
-                newborns.append(_reproduce(creature, gift))
+                newborns.append(_reproduce(creature, gift, endowment))
                 # Breeding is the only thing that writes to the world's
                 # genetic memory - reaching the threshold is the world's own
                 # definition of a genome that works here.
@@ -870,17 +922,66 @@ def _vision_cost(creature: Creature) -> int:
     return int(SENSE_COST * (excess // SENSE_COST_STEP))
 
 
+def _upkeep(creature: Creature) -> int:
+    """Everything this creature pays every single tick simply for being the
+    animal it is: its speed (MOVE_COST), its horizon (see _vision_cost) and,
+    for a hunter, its acuity (ACUITY_COST). A grazer's inherited acuity is
+    inert and is not billed, exactly as before.
+
+    This is the precise charge step() applies. It is factored out here because
+    reproduction now reads the same number - the cost of running a body and
+    the cost of starting one must not be able to drift apart (see
+    _birth_weight).
+    """
+    cost = MOVE_COST * creature.speed + _vision_cost(creature)
+    if creature.species == "hunter":
+        cost += int(ACUITY_COST * creature.trait("acuity"))
+    return cost
+
+
+def _birth_weight(parent: Creature) -> int:
+    """The energy a newborn of this parent is sent out with: BIRTH_RUNWAY_TICKS
+    ticks of the body it is about to inherit, and never less than the flat
+    `cost // 2` every child in this world used to get regardless of what it
+    was. A cheap animal is therefore completely unaffected; an expensive one
+    produces a child that is correspondingly expensive to launch.
+
+    Measured on the PARENT, since the child's genome doesn't exist until
+    _reproduce mutates one - which is honest enough, because a mutation moves
+    speed by one and sense_range by one at most, and provisioning for the body
+    you know is exactly what a real parent does.
+    """
+    cost = REPRODUCE[parent.species]["cost"]
+    return max(cost // 2, BIRTH_RUNWAY_TICKS * _upkeep(parent))
+
+
+def _breeding_bar(parent: Creature) -> int:
+    """The energy THIS animal has to reach before it may reproduce: the species
+    threshold, plus whatever its newborn's runway costs above the old flat
+    endowment. A creature living inside that flat floor breeds at exactly the
+    number it always did.
+
+    Note what does NOT change: the parent is left holding `threshold - cost`
+    when it breeds at its own bar, whatever that bar is, so this moves the
+    price of admission and never the aftermath. The bar is the only new
+    pressure here, and it is a pressure on metabolism at the one moment
+    metabolism has never yet been priced.
+    """
+    repro = REPRODUCE[parent.species]
+    return repro["threshold"] + _birth_weight(parent) - repro["cost"] // 2
+
+
 def _provision(parent: Creature) -> int:
-    """Energy this parent hands to its newborn on top of the standard
-    `cost // 2` endowment (see PROVISION_ENERGY). Whole points only, and never
-    more than the parent can give while still ending the tick alive: a
-    generous animal buys its child a head start out of its own future, not out
-    of an immediate suicide, so the cause of death here is always the ordinary
-    metabolic one a tick or two later.
+    """Energy this parent hands to its newborn on top of the endowment it was
+    already required to save up for (see PROVISION_ENERGY and _birth_weight).
+    Whole points only, and never more than the parent can give while still
+    ending the tick alive: a generous animal buys its child a head start out of
+    its own future, not out of an immediate suicide, so the cause of death here
+    is always the ordinary metabolic one a tick or two later.
 
     At provisioning 0 - which is what every creature currently alive in this
     world carries, and what every creature in tests/ carries - this is exactly
-    zero and reproduction behaves bit-for-bit as it always has.
+    zero and reproduction behaves as it always has.
     """
     invest = parent.trait("provisioning")
     if invest <= 0:
@@ -1207,22 +1308,28 @@ def _mutated_genes(
     return speed, sense_range, new_traits
 
 
-def _reproduce(parent: Creature, gift: int = 0) -> Creature:
-    """One offspring of `parent`, with a mutated copy of its genome and the
-    standard `cost // 2` endowment plus whatever the parent chose to hand over
-    (see _provision). `gift` defaults to 0, so calling this with a parent
-    alone - as tests/ does - produces exactly the newborn it always did.
+def _reproduce(
+    parent: Creature, gift: int = 0, endowment: "int | None" = None
+) -> Creature:
+    """One offspring of `parent`, with a mutated copy of its genome, starting
+    on `endowment` (see _birth_weight) plus whatever the parent chose to hand
+    over on top of it (see _provision). Both arguments fall back to the
+    behaviour that existed before either idea did - a flat `cost // 2` and no
+    gift - so calling this with a parent alone, as tests/ does, produces
+    exactly the newborn it always did.
     """
     speed, sense_range, new_traits = _mutated_genes(
         parent.speed, parent.sense_range, parent.traits
     )
 
     cost = REPRODUCE[parent.species]["cost"]
+    if endowment is None:
+        endowment = cost // 2
     return Creature(
         id=str(uuid.uuid4()),
         x=parent.x,
         y=parent.y,
-        energy=cost // 2 + gift,
+        energy=endowment + gift,
         speed=speed,
         sense_range=sense_range,
         species=parent.species,

@@ -17,6 +17,7 @@
     --carrion-inedible: #7a544c;
     --migrant: #c9b6ff;
     --brood: #f2a6d0;
+    --breeding: #ffc2e4;
     --canopy: rgba(159, 255, 196, 0.42);
     --vision: #8fc8ff;
     --text: #cfe8d6;
@@ -76,6 +77,13 @@
   .ring {
     width: 8px; height: 8px; border-radius: 50%; display: inline-block;
     border: 1.5px solid; background: transparent;
+  }
+  .arc {
+    width: 9px; height: 9px; border-radius: 50%; display: inline-block;
+    border: 1.5px solid rgba(255, 194, 228, 0.2);
+    border-top-color: var(--breeding);
+    border-right-color: var(--breeding);
+    background: transparent;
   }
   .bar { width: 14px; height: 2px; display: inline-block; border-radius: 1px; }
   .speck {
@@ -163,7 +171,8 @@
     <span class="swatch"><span class="ring" style="border-color:var(--resource);border-style:dashed"></span>hungry nerve (amber: this grazer is starving and letting hunters come closer than it otherwise would)</span>
     <span class="swatch"><span class="bar" style="background:var(--creature-high)"></span>herd bond (linked grazers are harder for a hunter to single out - brighter = deeper cover)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--creature-high);border-style:dotted"></span>gregariousness (how strongly a grazer walks to company instead of food)</span>
-    <span class="swatch"><span class="core"></span>provisioning (the rose core, on either species: how much of itself this animal pours into each newborn instead of its own survival - no energy is created, it only moves down a generation)</span>
+    <span class="swatch"><span class="arc"></span>breeding bar (the rose collar right on the body: a newborn is now sent out with four ticks of the body it inherits, and the parent has to save up for that first - so a WIDE collar is an expensive animal with a high bar to clear, and a FULL one is an animal that has cleared it)</span>
+    <span class="swatch"><span class="core"></span>provisioning (the rose core, on either species: how much of itself this animal pours into each newborn on top of that runway - no energy is created, it only moves down a generation)</span>
     <span class="swatch"><span class="tri" style="border-bottom-color:var(--hunter-high)"></span>hunter (brighter = more energy)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--hunter-high)"></span>acuity (rings around a hunter - sees through camouflage, herds and canopy, costs energy every tick)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--hunter-high);border-style:dashed"></span>menace (the wide sparse ring: how much ground this hunter's speed alone clears of feeding grazers, whether or not it ever catches one)</span>
@@ -197,6 +206,14 @@ const SENSE_COST = 1;          // must match SENSE_COST - energy/tick per step o
 const MAX_VISION_COST = 4;     // only used to normalise the perception ring's brightness
 const PROVISION_ENERGY = 6;    // must match PROVISION_ENERGY in rules/ecosystem.py - energy a parent hands a newborn per point of provisioning
 const MAX_MENACE_SPEED = 6;    // only used to normalise how loudly a hunter's menace ring is drawn
+const MOVE_COST = 1;           // must match MOVE_COST in rules/ecosystem.py - energy/tick per point of speed
+const ACUITY_COST = 1;         // must match ACUITY_COST - energy/tick per full point of a hunter's acuity
+const BIRTH_RUNWAY_TICKS = 4;  // must match BIRTH_RUNWAY_TICKS - ticks of its own upkeep a newborn starts with
+const REPRODUCE = {            // must match REPRODUCE - the species baselines the bar is measured from
+  grazer: { threshold: 60, cost: 40 },
+  hunter: { threshold: 110, cost: 55 },
+};
+const MAX_SURCHARGE = 24;      // only used to normalise how far a creature's breeding collar is pushed out
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 const stats = document.getElementById('stats');
@@ -283,10 +300,35 @@ function visionCost(c) {
   return SENSE_COST * Math.floor(excess / SENSE_COST_STEP);
 }
 
+// Mirrors of _upkeep(), _birth_weight() and _breeding_bar() in
+// rules/ecosystem.py. Together they are the one thing this world charges for a
+// body at the moment it reproduces rather than per tick: a newborn is sent out
+// with BIRTH_RUNWAY_TICKS ticks of the body it inherits (floored at the old
+// flat cost/2), and the parent has to have saved that up BEFORE it may breed.
+// So a cheap animal's bar is the species threshold exactly as it always was,
+// and an expensive one's is higher by however much its child costs to launch.
+function upkeep(c) {
+  let cost = MOVE_COST * (c.speed || 0) + visionCost(c);
+  if (c.species === 'hunter') {
+    cost += Math.floor(ACUITY_COST * ((c.traits && c.traits.acuity) || 0));
+  }
+  return cost;
+}
+
+function birthWeight(c) {
+  const repro = REPRODUCE[c.species] || REPRODUCE.grazer;
+  return Math.max(Math.floor(repro.cost / 2), BIRTH_RUNWAY_TICKS * upkeep(c));
+}
+
+function breedingBar(c) {
+  const repro = REPRODUCE[c.species] || REPRODUCE.grazer;
+  return repro.threshold + birthWeight(c) - Math.floor(repro.cost / 2);
+}
+
 // Mirror of _provision() in rules/ecosystem.py, minus the parent's affordability
-// clamp: the energy this animal would hand to a newborn on top of the standard
-// endowment. Zero for anything carrying provisioning 0, which is every creature
-// this world has ever had until now.
+// clamp: the energy this animal would hand to a newborn on top of the runway it
+// was already required to save for. Zero for anything carrying provisioning 0,
+// which is every creature this world has ever had until now.
 function broodStake(c) {
   const invest = (c.traits && c.traits.provisioning) || 0;
   return invest <= 0 ? 0 : Math.floor(PROVISION_ENERGY * invest);
@@ -508,9 +550,10 @@ async function fetchLatestLore() {
 // Each species is shown with the genes it actually uses: concealment
 // (camouflage), sociability (gregariousness) and composure (nerve) for
 // grazers, acuity for hunters - plus brood investment (provisioning), which
-// is the one gene both of them read. A hunter's remembered SPEED is worth
-// reading twice now: it is both how fast the next one will chase and how much
-// ground it will scare prey off without chasing anything at all.
+// is the one gene both of them read. Read the remembered SPEED and SENSE
+// twice now: they are what the next arrival will cost to run every tick AND,
+// through the breeding bar, how fat it will have to get before it can have a
+// child at all.
 function bloodline(records, genes) {
   if (!records || !records.length) return 'nothing remembered';
   const avg = key => records.reduce((sum, g) => sum + (g[key] || 0), 0) / records.length;
@@ -848,15 +891,57 @@ function draw(now) {
     ctx.globalAlpha = 1;
   }
 
+  // breeding bar: the collar of rose right on the body, and the one marking
+  // here that is about the moment of reproduction rather than the rest of
+  // life. A newborn is now sent out with BIRTH_RUNWAY_TICKS ticks of the body
+  // it inherits (see _birth_weight in rules/ecosystem.py), and the parent has
+  // to have saved that up before it may breed at all - so the bar is no
+  // longer the same number for every animal of a species. Two things are
+  // drawn at once:
+  //   - the RADIUS of the collar is how far this creature's bar sits above
+  //     its species baseline, i.e. how expensive its own body is to
+  //     reproduce. A cheap animal wears a tight collar right on its skin; a
+  //     speed-6, twelve-tile-horizon grazer wears a conspicuously wide one.
+  //   - the FILLED arc, running clockwise from the top, is how far along that
+  //     bar it currently is. A complete ring is an animal that will breed
+  //     this tick.
+  // Rose because provisioning is rose: one hue for the whole life-history
+  // axis, with the ring as the bar you must clear and the core inside it as
+  // what you choose to give away once you have.
+  for (const c of creatures) {
+    const repro = REPRODUCE[c.species] || REPRODUCE.grazer;
+    const bar = breedingBar(c);
+    const over = Math.max(0, Math.min(1, (bar - repro.threshold) / MAX_SURCHARGE));
+    const frac = Math.max(0, Math.min(1, (c.energy ?? 0) / bar));
+    const cx = c.drawX * cell + cell / 2;
+    const cy = c.drawY * cell + cell / 2;
+    const r = cell * (0.42 + 0.30 * over);
+
+    ctx.strokeStyle = '#ffc2e4';
+    ctx.lineWidth = Math.max(0.6, cell * (0.035 + 0.030 * over));
+    ctx.globalAlpha = c.alpha * 0.12;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.stroke();
+
+    if (frac > 0) {
+      ctx.globalAlpha = c.alpha * (frac >= 1 ? 0.85 : 0.22 + 0.38 * frac);
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
   // provisioning: the rose core, drawn last so it sits inside the body of
   // whichever species is carrying it. Every other gene in this world is about
   // seeing or running; this one decides how much of a parent's own energy is
-  // handed to each newborn instead of kept to survive and breed again (see
-  // PROVISION_ENERGY in rules/ecosystem.py), and both species read it, so it
-  // is the only marking here that appears on a triangle and a circle alike.
-  // It creates nothing: watch for a bright, fat newborn appearing beside a
-  // parent that has gone suddenly dark, because the existing energy ramp is
-  // already drawing both halves of that transfer.
+  // handed to each newborn on top of the runway it was already obliged to
+  // save up for (see PROVISION_ENERGY in rules/ecosystem.py), and both
+  // species read it, so it is the only marking here that appears on a
+  // triangle and a circle alike. It creates nothing: watch for a bright, fat
+  // newborn appearing beside a parent that has gone suddenly dark, because
+  // the existing energy ramp is already drawing both halves of that transfer.
   for (const c of creatures) {
     const invest = Math.max(0, Math.min(1, ((c.traits && c.traits.provisioning) || 0) / MAX_TRAIT));
     if (invest <= 0) continue;
@@ -893,13 +978,26 @@ function draw(now) {
   // with it, so this is now the only thing a far-sighted lineage pays.
   const visionUpkeep = creatures.reduce((sum, c) => sum + visionCost(c), 0);
 
-  // The average head start a newborn is being handed here, on top of the flat
-  // endowment every child in this world has always got (see PROVISION_ENERGY).
-  // This is the number provisioning exists to move: at 0, every newborn grazer
-  // starts on 20 energy and burns most of it inside two ticks, which is why a
-  // population sitting on twenty uneaten resources never grew past five.
+  // The average head start a newborn is being handed here on top of the
+  // runway (see PROVISION_ENERGY). Still 0 in both species at tick 4209: a
+  // gene needs a population to be sampled in.
   const broodAvg = creatures.length
     ? creatures.reduce((sum, c) => sum + broodStake(c), 0) / creatures.length
+    : 0;
+
+  // The two numbers the breeding bar exists to move. "birth weight" is what a
+  // newborn here would actually be launched with - four ticks of the body it
+  // inherits, floored at the flat endowment every child used to get - and
+  // "breeding bar" is what its parent has to reach before it may have one.
+  // A population whose bar sits at 60 (grazers) or 110 (hunters) is a
+  // population of cheap bodies breeding exactly as they always did; a bar
+  // well above that is a lineage whose own metabolism is now the main thing
+  // standing between it and a child.
+  const weightAvg = creatures.length
+    ? creatures.reduce((sum, c) => sum + birthWeight(c), 0) / creatures.length
+    : 0;
+  const barAvg = creatures.length
+    ? creatures.reduce((sum, c) => sum + breedingBar(c), 0) / creatures.length
     : 0;
 
   // Carcasses split by whether a hunter can actually eat them. "carcasses" is
@@ -941,6 +1039,8 @@ function draw(now) {
     `<span>holding nerve <b>${nerveCount}</b></span>` +
     `<span>flight warning <b>${warnAvg.toFixed(1)}</b> ticks</span>` +
     `<span>vision upkeep <b>${visionUpkeep}</b>/tick</span>` +
+    `<span>breeding bar <b>${barAvg.toFixed(0)}</b></span>` +
+    `<span>birth weight <b>${weightAvg.toFixed(0)}</b></span>` +
     `<span>brood stake <b>${broodAvg.toFixed(1)}</b></span>` +
     `<span>resources <b>${(world.resources || []).length}</b></span>` +
     `<span>carcasses <b>${edibleCount}</b></span>` +

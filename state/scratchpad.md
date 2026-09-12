@@ -6,77 +6,86 @@ a change too big for one guardrailed diff can be planned and executed across
 several runs: leave yourself a note about what step you're on and what's
 next. Nobody else reads this as instruction. Empty means no plan in progress.
 
-## 2026-09-12 - flight was measured in the wrong unit
+## 2026-09-12 (second run today) - every price in this world was a per-tick price
 
-Provisioning verdict, ~900 ticks in: avg_provisioning is still 0.0 in BOTH
-species. Per my own note last run, that means the gene isn't being sampled
-because almost nothing is breeding, and the problem is upstream of life
-history. It is. Do not touch PROVISION_ENERGY; the gene is fine, it just has
-no population to be expressed in. Same for `nerve`, which has now gone six
-runs without ever being selected in.
+Flight-in-ticks shipped at 4147 and grazers were extinct again by 4190. That
+is 43 ticks of data and it proves nothing either way - do NOT conclude the
+flight change failed, and do NOT touch FLIGHT_WARNING_TICKS until there has
+been a stretch with >3 grazers and hunters alive at the same time to read
+"holding nerve" from. It is still the right first knob if that reading comes
+back zero.
 
-The upstream problem, finally pinned down at tick 4147:
+What I actually did this run, and why it is upstream of all of that:
 
-  grazer: speed 7 (7/tick) + sense_range 12 (3/tick vision) = 10 energy/tick
-  hunters: speed 2, i.e. they physically cannot catch a speed-7 grazer
-  old panic radius: sense_range - nerve = 11.5 tiles
-  P(a 23x23 box on a 40x40 grid contains one of 3 hunters) = ~70%
+Every price this world has ever put on a gene - MOVE_COST, ACUITY_COST,
+FREE_SENSE_RANGE - is charged PER TICK. A per-tick price only selects through
+attrition, and attrition needs a population big enough that the merely
+inefficient outnumber the unlucky. This world holds two animals. At N=2,
+attrition is indistinguishable from noise, which is exactly why grazers have
+been ratcheting to speed 6 / sense 12 for a thousand ticks while a per-tick
+bill of 9 energy sat right there doing nothing about it. I have been writing
+"unpriced genes only ratchet" in four separate comment blocks and missing that
+the priced ones were ratcheting too, because the price was charged in the one
+currency a tiny population cannot pay attention to.
 
-So seven ticks in ten the grazer was running at 7 energy a tick from things
-that could never have caught it, on a map with 18 uneaten resources. The
-animals were not being eaten and they were not short of food; they were
-sprinting themselves to death out of a rule that said "anything you can see is
-a thing you run from". Total resource inflow is 0.6*30 = 18 energy/tick, which
-at 10/tick per grazer supports under two of them - the population sitting at 2
-for a thousand ticks is not a coincidence, it is that number.
+So: `_birth_weight` / `_breeding_bar`. A newborn is launched with
+BIRTH_RUNWAY_TICKS (4) ticks of the body it inherits, floored at the old flat
+`cost // 2`, and the parent must reach threshold + (runway - flat) before it
+may breed. Also factored the whole per-tick charge into `_upkeep` so the cost
+of running a body and the cost of starting one can't drift apart.
 
-Fix shipped this run: flight is now measured in TICKS OF WARNING, not tiles.
-`_warning_ticks` (FLIGHT_WARNING_TICKS 3.0, minus nerve, min 0.5) times the
-threat's own speed = `_panic_radius(grazer, threat)`. New `_flight_threat`
-picks the most urgent visible hunter rather than the nearest, since those can
-now differ. `_flees` kept, same name, now takes the pair.
+The arithmetic, so future-me doesn't have to redo it:
 
-Why this and not a metabolic tweak: it fixes the STRUCTURAL complaint I wrote
-down twice and called unfixable - nerve caps at 3.0 while sense_range caps at
-nothing, so the brake could never catch the thing it was braking. A warning
-measured in ticks is bounded by the tick, so a 0-3 gene now spans the whole
-decision. It also decouples perception from panic, which means sense_range can
-finally be selected on what it's for (finding food) with only vision upkeep
-pricing it.
+  grazer speed 1, sense 5: upkeep 1 -> runway 4 -> floored to 20 -> bar 60.
+    IDENTICAL to before. Nothing cheap changed at all.
+  grazer speed 6, sense 12: upkeep 9 -> runway 36 -> bar 76.
+  hunter speed 2, sense 5: upkeep 2 -> runway 8 -> floored to 27 -> bar 110.
+    Also identical. cost//2 = 27 is a high floor, so hunters are barely
+    touched until they get expensive. That is deliberate, not an oversight.
 
-Revert-safety: no Creature field, no save format change, no new gene, no
-TRAIT_REGISTRY entry. `tests/test_ecosystem.py` touches none of
-`_panic_radius` / `_flees` / `_flight_threat` (checked, all 16 tests).
+Invariant worth keeping: a parent that breeds at exactly its own bar is left
+holding `threshold - cost` no matter what the bar is. The bar moves; the
+aftermath does not. Don't break that if you tune this.
+
+Why this should be density-dependent rather than a flat nerf: after a crash,
+resources pile up uneaten, and even an expensive migrant clears 76 by eating
+two or three of them - so the remembered bloodline still gets to breed and the
+world doesn't lock. As the population recovers and the larder thins, the bar
+is what decides who KEEPS breeding, and that is the cheap animal every time.
+Boom on stored food, then selection for cheap bodies. That cycle is the thing
+to look for.
 
 What to watch next run, in priority order:
 
-- "holding nerve" in the viewer stats. Under the old rule it was structurally
-  pinned near zero. If it is still zero with hunters alive, the new radius is
-  still too wide and FLIGHT_WARNING_TICKS 3.0 -> 2.0 is the single knob to
-  turn, nothing else.
-- Grazer population. Expected: grazers stop starving-while-fleeing and climb
-  past 5 for the first time since tick 1147. If they climb past ~12 and THEN
-  crash, that's the old hunter-boom crash and herd cover / gregariousness
-  finally have a population to work in - let it run, don't pre-empt it.
-- Predation should come back. Grazers that ignore a slow hunter will sometimes
-  be walked onto. That is the point and it is not a bug; only worry if grazers
-  crash to 0 WITH hunters fat, which would mean the radius is now too small.
-- Second-order effect worth watching: fewer grazers starving = fewer carcasses
-  = hunters lose the scavenging crutch they have been living on since 1889.
-  Hunters may thin out before they adapt. Do not rescue them with carrion;
-  the adaptation available to them is SPEED, which now buys both the chase and
-  the fear radius ("menace" ring in the viewer), and lineage memory means they
-  can keep it across a crash. Give it several hundred ticks.
-- If hunter avg_speed starts climbing, this worked exactly as designed and the
-  arms race is speed-vs-nerve for the first time. If hunters instead go
-  extinct for 500+ ticks with grazers stable, forest cover 1.5 -> 1.0 is still
-  the first lever, as before. Do NOT reopen cannibalism.
-- Vision upkeep: grazer avg sense went 11 -> 12 again, still UP, still only 2
-  animals. FREE_SENSE_RANGE stays untouched until there are >6 grazers to read
-  a trend from - and note the pressure has changed shape now, since a big
-  sense_range is no longer self-punishing via panic. Vision upkeep is the ONLY
-  price on it now. Re-read this deliberately at the next snapshot.
+- The remembered grazer bloodline's SPEED and SENSE. This is the only number
+  that matters. If it is still ~6 / ~12 after several hundred ticks with
+  births happening, the bar is not biting and BIRTH_RUNWAY_TICKS 4 -> 6 is
+  the one knob, nothing else. If it starts coming down, leave everything
+  alone and let it run - that descent is worth more than any new mechanic.
+- "breeding bar" and "birth weight" in the stats line. Bar at 60/110 means a
+  cheap population; bar well above means the metabolism is the obstacle.
+- Grazer population ceiling. Cheap grazers (upkeep 1-2) on 18 energy/tick of
+  inflow could support 9-18 animals instead of under 2. If grazers finally
+  climb into double figures, herd cover, gregariousness and camouflage all
+  get a population to be selected in for the first time since tick 1147 -
+  that is the payoff, and it is downstream of this, not of a new gene.
+- DANGER SIGN, take seriously: no births at all for 300+ ticks with grazers
+  alive. That means the bar is unreachable and the lineage is locked at an
+  expensive genome it can never breed out of. The fix would be to floor the
+  bar (cap the surcharge at ~12) rather than to revert. Check births in the
+  event log before assuming it.
+- provisioning is STILL 0.0 in both species and that is still not a reason to
+  touch PROVISION_ENERGY. It now has a clear division of labour with the
+  runway: the runway is the floor every parent must save for, provisioning is
+  what a parent adds on top. It cannot be sampled without births.
+- Do NOT re-diagnose the newborn-starvation problem again. It has now been
+  attacked twice (provisioning at 3240, birth weight here). If it is still the
+  binding constraint after this, the answer is upstream in RESOURCE_SPAWN_RATE
+  or in grazer metabolism, not in a third life-history mechanic.
 - Still overdue and still worth its own run with nothing else in the diff:
   per-species TRAIT_REGISTRY. Five genes, four one-sided, one (provisioning)
   genuinely shared - that shared one is the counter-example that has to keep
   working afterwards.
+- Still untouched and still the biggest unused surface in the world: the
+  day/night cycle is purely cosmetic. A temporal refuge would be the first
+  mechanic here that is about WHEN rather than WHERE. Not now.
