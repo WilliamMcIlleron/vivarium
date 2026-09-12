@@ -176,7 +176,7 @@
     <span class="swatch"><span class="tri" style="border-bottom-color:var(--hunter-high)"></span>hunter (brighter = more energy)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--hunter-high)"></span>acuity (rings around a hunter - sees through camouflage, herds and canopy, costs energy every tick)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--hunter-high);border-style:dashed"></span>menace (the wide sparse ring: how much ground this hunter's speed alone clears of feeding grazers, whether or not it ever catches one)</span>
-    <span class="swatch"><span class="dot" style="background:var(--resource)"></span>resource (grows where light reaches the ground, so it clusters in the open)</span>
+    <span class="swatch"><span class="dot" style="background:var(--resource)"></span>resource (grows where light reaches the ground, so it clusters in the open - and fattens the longer nobody eats it: small and dark is freshly sprouted and worth what a resource here has always been worth, big and pale is a plant that has stood a hundred ticks, ringed once it can grow no further)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--carrion)"></span>carcass (a grazer's body - the only carrion a hunter can eat; fades as it rots)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--carrion-inedible);border-style:dotted"></span>hunter remains (crossed out: predators no longer live off their own dead, so this is scenery)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--migrant);border-style:dashed"></span>migrant (just arrived, carries remembered genes)</span>
@@ -205,6 +205,9 @@ const SENSE_COST_STEP = 2;     // must match SENSE_COST_STEP - tiles of extra ho
 const SENSE_COST = 1;          // must match SENSE_COST - energy/tick per step of extra horizon
 const MAX_VISION_COST = 4;     // only used to normalise the perception ring's brightness
 const PROVISION_ENERGY = 6;    // must match PROVISION_ENERGY in rules/ecosystem.py - energy a parent hands a newborn per point of provisioning
+const RESOURCE_ENERGY = 30;      // must match RESOURCE_ENERGY - what a plant is worth the tick it sprouts
+const RESOURCE_RIPEN_TICKS = 2;  // must match RESOURCE_RIPEN_TICKS - ticks of undisturbed growth per extra energy
+const RESOURCE_MAX_ENERGY = 75;  // must match RESOURCE_MAX_ENERGY - where a plant stops putting on weight
 const MAX_MENACE_SPEED = 6;    // only used to normalise how loudly a hunter's menace ring is drawn
 const MOVE_COST = 1;           // must match MOVE_COST in rules/ecosystem.py - energy/tick per point of speed
 const ACUITY_COST = 1;         // must match ACUITY_COST - energy/tick per full point of a hunter's acuity
@@ -245,6 +248,16 @@ function coverAt(terrain, x, y) {
   const row = terrain[y];
   if (!row) return 0;
   return TERRAIN_COVER[row[x]] || 0;
+}
+
+// Mirror of _resource_energy() in rules/ecosystem.py: what a plant is actually
+// worth to whatever eats it. A resource saved before plants had an age reads
+// as freshly sprouted, exactly as the sim treats it on load.
+function resourceEnergy(r) {
+  return Math.min(
+    RESOURCE_MAX_ENERGY,
+    RESOURCE_ENERGY + Math.floor((r.age || 0) / RESOURCE_RIPEN_TICKS)
+  );
 }
 
 // Chebyshev distance - the box-shaped metric both sense_range and flight use
@@ -569,22 +582,41 @@ function draw(now) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   drawTerrain(world.terrain);
 
-  // resources: small diamonds. They no longer land uniformly - food grows
-  // where light reaches the ground (TERRAIN_FERTILITY in rules/ecosystem.py),
-  // so over time you should see them thin out under the speckled canopy and
-  // crowd the open grass. The total number spawning per tick is unchanged;
-  // only where they fall is.
-  const resourceColor = '#e8c07d';
+  // resources: small diamonds, and as of this run they are no longer all the
+  // same diamond. Food still grows where light reaches the ground
+  // (TERRAIN_FERTILITY in rules/ecosystem.py), so it thins out under the
+  // speckled canopy and crowds the open grass - but a plant is now worth
+  // RESOURCE_ENERGY only on the tick it sprouts, and puts on weight for every
+  // tick nobody comes to eat it (see _resource_energy). Size, colour and glow
+  // are therefore a direct readout of what that tile is actually worth: a
+  // scatter of small dark specks is a grazed-out world living on its bare
+  // income, a map of fat pale diamonds is two hundred ticks of nobody coming,
+  // and that is the feast a re-migrating species walks back into. A plant
+  // that can grow no further wears a thin ring.
   for (const r of world.resources || []) {
     const cx = r.x * cell + cell / 2;
     const cy = r.y * cell + cell / 2;
-    const s = cell * 0.22;
-    ctx.fillStyle = resourceColor;
+    const ripe = Math.max(0, Math.min(1,
+      (resourceEnergy(r) - RESOURCE_ENERGY) /
+      (RESOURCE_MAX_ENERGY - RESOURCE_ENERGY)));
+    const s = cell * (0.15 + 0.21 * ripe);
+    const color = lerpColor('#9c7a4a', '#ffe6a8', ripe);
+    ctx.fillStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 7 * ripe;
     ctx.beginPath();
     ctx.moveTo(cx, cy - s); ctx.lineTo(cx + s, cy);
     ctx.lineTo(cx, cy + s); ctx.lineTo(cx - s, cy);
     ctx.closePath();
     ctx.fill();
+    ctx.shadowBlur = 0;
+    if (ripe >= 1) {
+      ctx.strokeStyle = 'rgba(255, 230, 168, 0.32)';
+      ctx.lineWidth = Math.max(0.6, cell * 0.028);
+      ctx.beginPath();
+      ctx.arc(cx, cy, s * 1.6, 0, Math.PI * 2);
+      ctx.stroke();
+    }
   }
 
   // carrion: hollow rings drawn under the living, so a scavenging hunter
@@ -1004,6 +1036,16 @@ function draw(now) {
   // the food supply - it only exists while there are grazers dying of
   // something other than predation - and "hunter remains" is the tally of
   // predators that starved, which is now a dead end rather than a meal.
+  // The larder: total energy standing on the ground, which is not the same
+  // thing as the number of diamonds any more. Twenty-five resources can be
+  // worth 750 in a world that is being eaten flat or 1800 in one that has
+  // been empty for two hundred ticks, and that difference is the entire
+  // mechanism (see _resource_energy in rules/ecosystem.py). Read it against
+  // "resources": a high larder on a low count is ripe ground waiting for
+  // something to come back and eat it.
+  const larder = (world.resources || []).reduce(
+    (sum, r) => sum + resourceEnergy(r), 0);
+
   const carrionList = world.carrion || [];
   const edibleCount = carrionList.filter(edibleCarrion).length;
   const remainsCount = carrionList.length - edibleCount;
@@ -1043,6 +1085,7 @@ function draw(now) {
     `<span>birth weight <b>${weightAvg.toFixed(0)}</b></span>` +
     `<span>brood stake <b>${broodAvg.toFixed(1)}</b></span>` +
     `<span>resources <b>${(world.resources || []).length}</b></span>` +
+    `<span>larder <b>${larder}</b></span>` +
     `<span>carcasses <b>${edibleCount}</b></span>` +
     `<span>hunter remains <b>${remainsCount}</b></span>`;
 

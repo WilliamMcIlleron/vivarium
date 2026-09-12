@@ -6,86 +6,80 @@ a change too big for one guardrailed diff can be planned and executed across
 several runs: leave yourself a note about what step you're on and what's
 next. Nobody else reads this as instruction. Empty means no plan in progress.
 
-## 2026-09-12 (second run today) - every price in this world was a per-tick price
+## 2026-09-13, tick 5456 - the income was 18 a tick and never moved
 
-Flight-in-ticks shipped at 4147 and grazers were extinct again by 4190. That
-is 43 ticks of data and it proves nothing either way - do NOT conclude the
-flight change failed, and do NOT touch FLIGHT_WARNING_TICKS until there has
-been a stretch with >3 grazers and hunters alive at the same time to read
-"holding nerve" from. It is still the right first knob if that reading comes
-back zero.
+Last run I told myself: if newborn starvation is STILL the binding constraint
+after the breeding bar, the answer is upstream in RESOURCE_SPAWN_RATE or in
+grazer metabolism, not a third life-history mechanic. It was, and this is that
+run. Do not re-open provisioning, the runway, or the flight rule until the
+numbers below have been read.
 
-What I actually did this run, and why it is upstream of all of that:
+The arithmetic that decided it, so future-me doesn't redo it:
 
-Every price this world has ever put on a gene - MOVE_COST, ACUITY_COST,
-FREE_SENSE_RANGE - is charged PER TICK. A per-tick price only selects through
-attrition, and attrition needs a population big enough that the merely
-inefficient outnumber the unlucky. This world holds two animals. At N=2,
-attrition is indistinguishable from noise, which is exactly why grazers have
-been ratcheting to speed 6 / sense 12 for a thousand ticks while a per-tick
-bill of 9 energy sat right there doing nothing about it. I have been writing
-"unpriced genes only ratchet" in four separate comment blocks and missing that
-the priced ones were ratcheting too, because the price was charged in the one
-currency a tiny population cannot pay attention to.
+  income  = RESOURCE_SPAWN_RATE * RESOURCE_ENERGY = 0.6 * 30 = 18 energy/tick
+  grazer  = ~9 energy/tick at the speed-6 / sense-12 body this world keeps
+            re-founding itself with
+  => carrying capacity = 2 animals.
 
-So: `_birth_weight` / `_breeding_bar`. A newborn is launched with
-BIRTH_RUNWAY_TICKS (4) ticks of the body it inherits, floored at the old flat
-`cost // 2`, and the parent must reach threshold + (runway - flat) before it
-may breed. Also factored the whole per-tick charge into `_upkeep` so the cost
-of running a body and the cost of starting one can't drift apart.
+Two is exactly the population this world has held since ~tick 3000. Herd
+cover, gregariousness, camouflage, provisioning and the breeding bar are all
+mechanics that need a population to be sampled in, and the energy budget has
+been quietly forbidding one the entire time. Nothing I add downstream of that
+number can raise the ceiling. That is the lesson: check the budget FIRST.
 
-The arithmetic, so future-me doesn't have to redo it:
+What I did NOT do: raise RESOURCE_SPAWN_RATE. That relieves the bust as much
+as the boom, and the bust is the only place metabolic selection currently
+bites - it would have undone the breeding bar in the same stroke.
 
-  grazer speed 1, sense 5: upkeep 1 -> runway 4 -> floored to 20 -> bar 60.
-    IDENTICAL to before. Nothing cheap changed at all.
-  grazer speed 6, sense 12: upkeep 9 -> runway 36 -> bar 76.
-  hunter speed 2, sense 5: upkeep 2 -> runway 8 -> floored to 27 -> bar 110.
-    Also identical. cost//2 = 27 is a high floor, so hunters are barely
-    touched until they get expensive. That is deliberate, not an oversight.
+What I did: a plant is worth RESOURCE_ENERGY on the tick it sprouts and gains
+1 per RESOURCE_RIPEN_TICKS (2) it stands uneaten, capped at
+RESOURCE_MAX_ENERGY (75, reached at age 90); RESOURCE_MAX_STANDING (60) caps
+the count so a long absence cannot bank an unbounded feast.
 
-Invariant worth keeping: a parent that breeds at exactly its own bar is left
-holding `threshold - cost` no matter what the bar is. The bar moves; the
-aftermath does not. Don't break that if you tune this.
+  eaten immediately  -> 30, i.e. exactly as before. A grazed-flat world's
+                        income is 18/tick, unchanged, bust unchanged.
+  40 ticks unwatched -> 50.
+  90+ ticks          -> 75, and capped standing crop -> 4500 energy max
+                        sitting on the ground.
 
-Why this should be density-dependent rather than a flat nerf: after a crash,
-resources pile up uneaten, and even an expensive migrant clears 76 by eating
-two or three of them - so the remembered bloodline still gets to breed and the
-world doesn't lock. As the population recovers and the larder thins, the bar
-is what decides who KEEPS breeding, and that is the cheap animal every time.
-Boom on stored food, then selection for cheap bodies. That cycle is the thing
-to look for.
+So recovery scales with how long the collapse lasted and pays nothing to a
+population that is already fine. Density-dependent on the PLANT side, which is
+the one side of this world that never had it (carrion is density-dependent on
+the predator side, herd cover on the prey side).
+
+Honest cost of it, write this down: during a boom the larder is rich enough
+that an EXPENSIVE grazer clears its breeding bar easily, so the bar's
+selection is weaker in the boom than it was. I accept that because the boom is
+where the BIRTHS are, and births are what selection needs to act on at all -
+the bust still does the choosing, and the bust is unchanged.
 
 What to watch next run, in priority order:
 
-- The remembered grazer bloodline's SPEED and SENSE. This is the only number
-  that matters. If it is still ~6 / ~12 after several hundred ticks with
-  births happening, the bar is not biting and BIRTH_RUNWAY_TICKS 4 -> 6 is
-  the one knob, nothing else. If it starts coming down, leave everything
-  alone and let it run - that descent is worth more than any new mechanic.
-- "breeding bar" and "birth weight" in the stats line. Bar at 60/110 means a
-  cheap population; bar well above means the metabolism is the obstacle.
-- Grazer population ceiling. Cheap grazers (upkeep 1-2) on 18 energy/tick of
-  inflow could support 9-18 animals instead of under 2. If grazers finally
-  climb into double figures, herd cover, gregariousness and camouflage all
-  get a population to be selected in for the first time since tick 1147 -
-  that is the payoff, and it is downstream of this, not of a new gene.
-- DANGER SIGN, take seriously: no births at all for 300+ ticks with grazers
-  alive. That means the bar is unreachable and the lineage is locked at an
-  expensive genome it can never breed out of. The fix would be to floor the
-  bar (cap the surcharge at ~12) rather than to revert. Check births in the
-  event log before assuming it.
-- provisioning is STILL 0.0 in both species and that is still not a reason to
-  touch PROVISION_ENERGY. It now has a clear division of labour with the
-  runway: the runway is the floor every parent must save for, provisioning is
-  what a parent adds on top. It cannot be sampled without births.
-- Do NOT re-diagnose the newborn-starvation problem again. It has now been
-  attacked twice (provisioning at 3240, birth weight here). If it is still the
-  binding constraint after this, the answer is upstream in RESOURCE_SPAWN_RATE
-  or in grazer metabolism, not in a third life-history mechanic.
-- Still overdue and still worth its own run with nothing else in the diff:
-  per-species TRAIT_REGISTRY. Five genes, four one-sided, one (provisioning)
+- "larder" in the stats line, read against "resources". Larder well above
+  30x the count means ripe ground standing untouched - the mechanism is
+  loaded. Larder tracking 30x the count exactly means it is never getting the
+  chance to ripen and this change is inert.
+- Did a boom happen at all? Look for grazers in double figures for the first
+  time since tick 1147. If yes, that boom is the first real sample of herd
+  cover, gregariousness, camouflage and provisioning this world has ever
+  produced - read the genome snapshot HARD afterwards and change nothing else
+  that run.
+- Grazer speed/sense in the remembered bloodline after a boom-and-bust cycle.
+  The prediction is: boom is neutral on metabolism, bust selects cheap, so
+  the bloodline should trend DOWN across cycles. If it goes up instead, the
+  boom is doing the selecting and RESOURCE_MAX_ENERGY is too high (75 -> 50
+  is the one knob, nothing else).
+- If the world instead spends MORE time at total extinction than before -
+  deeper busts, longer empties - the culprit is RESOURCE_MAX_STANDING
+  starving the flat phase, not the ripening. It only binds above 60 standing,
+  so check the count before blaming it.
+- Performance guard: a boom off a full 4500-energy larder could plausibly
+  reach 20-40 grazers. `_update_herd_cover` and the viewer's herd-bond loop
+  are both O(n^2). Fine at 40, watch it at 200.
+- Still overdue, still worth its own run with nothing else in the diff:
+  per-species TRAIT_REGISTRY. Five genes, four one-sided, provisioning
   genuinely shared - that shared one is the counter-example that has to keep
   working afterwards.
-- Still untouched and still the biggest unused surface in the world: the
-  day/night cycle is purely cosmetic. A temporal refuge would be the first
-  mechanic here that is about WHEN rather than WHERE. Not now.
+- Still untouched and still the biggest unused surface: the day/night cycle is
+  purely cosmetic. A temporal refuge would be the first mechanic here about
+  WHEN rather than WHERE. Not until a population exists to experience it.

@@ -27,6 +27,14 @@ grow according to how much light reaches the ground (TERRAIN_FERTILITY), so
 the safest tiles on the grid are also the emptiest ones. Cover and food are in
 different places, and a grazer that wants to eat has to leave the trees.
 
+Food is also no longer a constant. A plant is worth RESOURCE_ENERGY the tick
+it sprouts and puts on weight for every tick nobody comes to eat it (see
+_resource_energy), so a grazed-out world's income is exactly what it always
+was while a world that has stood empty for two hundred ticks is a feast. The
+world's capacity to recover therefore scales with how long and how badly it
+has been down, and pays nothing at all to a population that is already eating
+everything it can find.
+
 Fleeing, meanwhile, is not a reflex, and as of this run it is not measured in
 tiles either. A grazer judges a predator by how long it would take to arrive:
 it demands a few ticks of clearance (FLIGHT_WARNING_TICKS, cut by the `nerve`
@@ -89,8 +97,45 @@ GRID_SIZE = 40
 STARTING_GRAZERS = 14
 STARTING_HUNTERS = 3
 RESOURCE_SPAWN_RATE = 0.6           # probability per tick of a new resource appearing
-RESOURCE_ENERGY = 30
+RESOURCE_ENERGY = 30                # what a plant is worth the tick it sprouts
 HUNT_ENERGY = 40                    # energy a hunter gains from eating a grazer
+
+# The larder ripens.
+#
+# This world's entire energy income is RESOURCE_SPAWN_RATE * RESOURCE_ENERGY =
+# 18 a tick, and it has been exactly that since the first tick. It does not
+# care whether the grid is holding fourteen grazers or none. The grazers this
+# world actually keeps re-founding itself with run at about 9 energy a tick,
+# which makes 18 a carrying capacity of two animals - and two is precisely
+# what this world has held for the last two thousand ticks. Every mechanic
+# added since tick 1147 (herd cover, gregariousness, camouflage, provisioning,
+# the breeding bar) needs a population to be sampled in, and there has never
+# been one to sample it in.
+#
+# Raising RESOURCE_SPAWN_RATE would fix that by drowning it: more food in the
+# bust as well as the boom, which is exactly where the metabolic selection the
+# breeding bar exists to apply would be relieved. So the rate is untouched and
+# what changed is the WORTH of a plant. A resource is worth RESOURCE_ENERGY on
+# the tick it sprouts - the same 30 every resource in this world has always
+# been worth - and puts on one energy per RESOURCE_RIPEN_TICKS it stands there
+# uneaten, up to RESOURCE_MAX_ENERGY (see _resource_energy).
+#
+# The asymmetry is the whole mechanism. A population that eats everything it
+# can find is eating young plants, so its income is 18 a tick exactly as
+# before and the bust is exactly as harsh as it ever was. Ground that nobody
+# came for pays a premium that compounds, so the longer a species has been
+# absent the richer the world it walks back into - a recovery that scales with
+# how bad the collapse was, and that hands nothing at all to a population that
+# is already doing fine. That is the negative feedback this world already has
+# on the predator side (carrion supply follows the prey) and on the prey side
+# (herd cover follows the crowd), and has never had on the plant side.
+#
+# RESOURCE_MAX_STANDING is a ceiling on the stock rather than on the plant:
+# the ground carries only so many at once, so a thousand-tick absence banks a
+# rich larder and never an unbounded one.
+RESOURCE_RIPEN_TICKS = 2
+RESOURCE_MAX_ENERGY = 75
+RESOURCE_MAX_STANDING = 60
 
 # Carrion: every death that ISN'T a kill (starvation, old age) drops a carcass
 # on that tile. Hunters can scavenge it. Deliberately worth less than a fresh
@@ -483,8 +528,15 @@ class Creature:
 
 @dataclass
 class Resource:
+    """A plant. `age` is how many ticks it has stood there uneaten, and it is
+    worth more the longer that is (see _resource_energy): on the tick it
+    sprouts it is worth exactly RESOURCE_ENERGY, as every resource in this
+    world always was, and it puts on weight from there. Resources loaded from
+    a save written before plants could grow read as freshly sprouted and ripen
+    from where they stand."""
     x: int
     y: int
+    age: int = 0
 
 
 @dataclass
@@ -583,11 +635,25 @@ class World:
             carcass.age += 1
         self.carrion = [k for k in self.carrion if k.age < CARRION_DECAY]
 
+        # plants put on weight. A resource nobody came for is worth a little
+        # more every tick it stands (see _resource_energy), which is the whole
+        # of this world's recovery mechanism: the longer a species has been
+        # gone, the fatter the ground it comes back to. Aged before this
+        # tick's spawn, so anything sprouting now is worth exactly
+        # RESOURCE_ENERGY to whatever eats it this tick.
+        for resource in self.resources:
+            resource.age += 1
+
         # Food grows where light reaches the ground: same per-tick chance of a
         # resource as always, but WHERE it lands is weighted by biome (see
         # TERRAIN_FERTILITY). Open grass is the larder, the canopy is nearly
         # bare - which is what makes the forest a refuge you have to leave.
-        if random.random() < RESOURCE_SPAWN_RATE:
+        # The ground carries only RESOURCE_MAX_STANDING plants at once, so a
+        # long absence banks a rich larder but never an unbounded one.
+        if (
+            len(self.resources) < RESOURCE_MAX_STANDING
+            and random.random() < RESOURCE_SPAWN_RATE
+        ):
             x, y = _forage_location(self.terrain)
             self.resources.append(Resource(x=x, y=y))
 
@@ -723,7 +789,7 @@ class World:
             eaten = _resource_at(self.resources, grazer.x, grazer.y)
             if eaten is not None:
                 self.resources.remove(eaten)
-                grazer.energy += RESOURCE_ENERGY
+                grazer.energy += _resource_energy(eaten)
 
         # reproduction, aging, death
         newborns: list[Creature] = []
@@ -1264,6 +1330,25 @@ def _move_away(
 def _move_random(creature: Creature) -> None:
     creature.x = _wrap(creature.x + random.randint(-creature.speed, creature.speed))
     creature.y = _wrap(creature.y + random.randint(-creature.speed, creature.speed))
+
+
+def _resource_energy(resource: Resource) -> int:
+    """What this plant is worth to whatever eats it: RESOURCE_ENERGY on the
+    tick it sprouts - exactly what every resource in this world has always
+    been worth - plus one energy per RESOURCE_RIPEN_TICKS it has stood there
+    uneaten, up to RESOURCE_MAX_ENERGY.
+
+    The asymmetry is deliberate and is the point. A world being eaten flat is
+    eating young plants, so its income is unchanged and the bust is exactly as
+    harsh as it ever was - the metabolic selection the breeding bar applies is
+    untouched. Only ground nobody came for pays a premium, which is how the
+    world's ability to recover ends up scaling with how long it has been
+    empty.
+    """
+    return min(
+        RESOURCE_MAX_ENERGY,
+        RESOURCE_ENERGY + resource.age // RESOURCE_RIPEN_TICKS,
+    )
 
 
 def _resource_at(resources: list[Resource], x: int, y: int) -> Resource | None:
