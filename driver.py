@@ -523,14 +523,34 @@ def _spend_budget(budget: dict) -> None:
 
 
 def _parse_proposal(raw: str) -> dict | None:
+    """Pull the JSON proposal out of the model's reply.
+
+    The reply is supposed to be a bare JSON object, but a model that thinks
+    out loud puts a paragraph of reasoning in front of it, or buries the
+    object in a fence partway down. Only a fence at position zero used to be
+    handled, so anything else threw the whole run away - a full-size prompt
+    and its answer paid for, a valid proposal discarded on a formatting
+    technicality, which is the most expensive way this loop can fail. Try
+    the strict reading first, then each fenced block, then the outermost
+    {...} span, before giving up. Nothing downstream is relaxed: whatever
+    comes back still faces the allowlist, PROTECTED.md, the diff caps and
+    the tests exactly as before.
+    """
     cleaned = raw.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.split("```")[1]
-        cleaned = cleaned.removeprefix("json").strip()
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        return None
+    candidates = [cleaned]
+    if "```" in cleaned:
+        # odd indices are the insides of the fences
+        for block in cleaned.split("```")[1::2]:
+            candidates.append(block.removeprefix("json").strip())
+    start, end = cleaned.find("{"), cleaned.rfind("}")
+    if start != -1 and end > start:
+        candidates.append(cleaned[start:end + 1])
+    for candidate in candidates:
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+    return None
 
 
 def _validate_proposal(proposal: dict, budget: dict) -> tuple[bool, str]:

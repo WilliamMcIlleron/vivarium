@@ -39,7 +39,9 @@ class RateLimitedError(RuntimeError):
 # logs/evolve.log for the raw message if retries seem to have stopped
 # happening after a limit.
 _RATE_LIMIT_PATTERNS = re.compile(
-    r"usage limit|rate limit|limit reached|try again later|\b429\b", re.IGNORECASE
+    r"session limit|weekly limit|usage limit|rate limit|limit reached"
+    r"|try again later|\b429\b",
+    re.IGNORECASE,
 )
 
 
