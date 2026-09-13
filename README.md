@@ -53,35 +53,72 @@ empty `TRAIT_REGISTRY`.
 
 ## Quick start
 
+`simulate` needs nothing but Python. `evolve` needs Claude configured once, since it's
+the step that actually calls the model - see below before running it.
+
 ```bash
+git clone https://github.com/WilliamMcIlleron/vivarium.git
+cd vivarium
 pip install -r requirements.txt
-python driver.py simulate      # one free tick, no LLM
-python driver.py evolve        # one LLM-driven evolution step
+
+python driver.py simulate      # one free tick, no LLM - works immediately
+python driver.py evolve        # one LLM-driven evolution step - needs setup below first
 ```
 
-## Running it unattended (local schedule, Pro plan)
+Open `viewer/index.html` in a browser any time to watch the current world; it just reads
+`state/world.json`, no server needed.
 
-Uses the official Claude Code CLI (`claude -p`) authenticated with your Pro/Max
-subscription login: no API key needed, no extra cost beyond your existing plan. Runs
-locally on your own machine (see `config.py` for why not GitHub Actions on this backend).
+## Connecting `evolve` to Claude
 
-- Linux / macOS / WSL: see `crontab.example`.
-- Plain Windows (no WSL): Windows has no `cron` - see `SCHEDULING_WINDOWS.md` for the
-  Task Scheduler equivalent.
+This project doesn't ship an API key or any credentials - you connect your own, and it
+defaults to the free-with-your-subscription path rather than the pay-per-token one.
+`config.py` is the only file that knows about this; nothing else in the codebase cares
+which backend is active.
 
-## Upgrading to the API later
+### Option A: Claude Code CLI, your Pro/Max subscription (default, no extra cost)
 
-Swapping to pay-per-token billing (for reliability, higher frequency, or to move `evolve`
-onto GitHub Actions / a server) is a one-line change:
+This is what the default `WORLD_BACKEND=cli` setting uses. It shells out to the official
+`claude` CLI in non-interactive mode (`claude -p`), authenticated with your normal Claude
+login - the same subscription you'd use to chat with Claude Code interactively. No API
+key, no per-token billing, but it shares your regular 5-hour/weekly usage pool, which is
+why `evolve` defaults to running rarely (once a day) rather than continuously.
+
+1. Install the CLI if you don't have it already:
+   [docs.claude.com/en/docs/claude-code](https://docs.claude.com/en/docs/claude-code) has
+   the current instructions for your OS.
+2. Authenticate it once: `claude login` (opens a browser to sign in).
+3. Confirm it works: `claude -p "say hi"` should print a reply with no further prompts.
+4. That's it - `python driver.py evolve` will now use the same login.
+
+Keep in mind this is meant for your own machine, run occasionally, not for CI or shared
+infrastructure - see the caution in `config.py`.
+
+### Option B: Anthropic API key (pay-per-token)
+
+Needed if you want `evolve` running on a schedule somewhere other than your own machine
+(GitHub Actions, a server), or more often than the CLI's usage pool comfortably allows.
 
 ```bash
 export WORLD_BACKEND=api
-export ANTHROPIC_API_KEY=sk-...
+export ANTHROPIC_API_KEY=sk-...    # from console.anthropic.com
 ```
 
-`config.py` is the only file that knows about backends. Nothing else in the codebase
-changes. See `.github/workflows/evolve.yml.disabled` for the ready-to-enable Actions
-workflow once you're on the API backend.
+Get a key at [console.anthropic.com](https://console.anthropic.com) (Settings → API
+Keys). This bills per token against that account, separate from any Claude subscription.
+See `.github/workflows/evolve.yml.disabled` for a ready-to-enable GitHub Actions workflow
+once you're on this backend.
+
+## Running it unattended (local schedule, Pro plan)
+
+Once `evolve` works from the command line (above), the same call can run on a timer so
+the world evolves without you manually invoking it. Both scheduling docs below assume the
+CLI backend (Option A) and just run `python driver.py simulate` / `evolve` on an interval.
+
+- Linux / macOS / WSL: see `crontab.example`.
+- Plain Windows (no WSL): Windows has no `cron` - see `SCHEDULING_WINDOWS.md` for the
+  Task Scheduler equivalent. Note two Task Scheduler defaults worth checking on a laptop:
+  it won't fire while running on battery, and it won't catch up a missed trigger, unless
+  you turn both off in the task's settings.
 
 ## Structure
 
