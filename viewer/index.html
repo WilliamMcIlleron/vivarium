@@ -182,7 +182,7 @@
     <span class="swatch"><span class="ring" style="border-color:var(--carrion-inedible);border-style:dotted"></span>hunter remains (crossed out: predators no longer live off their own dead, so this is scenery)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--migrant);border-style:dashed"></span>migrant (just arrived, carries remembered genes)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--migrant);border-style:dotted"></span>the door (pulsing violet, with the absent species' own shape hollow inside it: where the next migrant of a species that has died out here would choose to come in - a grazer wants ground outside every hunter's menace radius and near something to eat, a hunter wants ground about a sense_range from the nearest prey. A real migrant only glances at two dozen tiles, so it lands near here rather than exactly here.)</span>
-    <span class="swatch"><span class="ring" style="border-color:var(--muted)"></span>the latch (a grey bar across the hunter's door: predators are drawn in by prey worth coming for rather than by the calendar, so while the grazers standing here are worth less than the threshold nothing walks in at all - and no single animal, however fat, can open it. The gate widens, brightens and starts pulsing again as the herd fattens toward the full rate.)</span>
+    <span class="swatch"><span class="ring" style="border-color:var(--muted)"></span>the latch (a grey bar across a door that is shut: neither species is called in by the calendar any more. A hunter comes only when the grazers standing here are worth the journey - and no single animal, however fat, can open that one. A grazer comes only when enough of the map lies outside every hunter's menace radius to be worth walking into, so a grid covered edge to edge by predators posts nothing more into itself and the besiegers, who cannot eat their own dead, starve the latch back open. Either gate widens, brightens and starts pulsing again as its own condition improves.)</span>
   </div>
   <div id="memory"></div>
   <div id="latest-evolve"></div>
@@ -219,6 +219,8 @@ const ARRIVAL_CANDIDATES = 24;   // must match ARRIVAL_CANDIDATES - how many til
 const ARRIVAL_SAFE_MARGIN = 6;   // must match ARRIVAL_SAFE_MARGIN - clearance past which one safe tile is as good as another
 const HUNTER_MIGRATION_HOOF = 90;  // must match HUNTER_MIGRATION_HOOF - prey worth below which no predator comes at all
 const HUNTER_MIGRATION_FULL = 180; // must match HUNTER_MIGRATION_FULL - prey worth at which they come at the full old rate
+const GRAZER_MIGRATION_OPEN = 0.15; // must match GRAZER_MIGRATION_OPEN - share of the grid free of menace below which no grazer comes at all
+const GRAZER_MIGRATION_FULL = 0.55; // must match GRAZER_MIGRATION_FULL - share at which they come at the full old rate
 const MOVE_COST = 1;           // must match MOVE_COST in rules/ecosystem.py - energy/tick per point of speed
 const ACUITY_COST = 1;         // must match ACUITY_COST - energy/tick per full point of a hunter's acuity
 const BIRTH_RUNWAY_TICKS = 4;  // must match BIRTH_RUNWAY_TICKS - ticks of its own upkeep a newborn starts with
@@ -300,6 +302,21 @@ function hunterDrawShare(creatures) {
   if (hoof <= HUNTER_MIGRATION_HOOF) return 0;
   const span = Math.max(1, HUNTER_MIGRATION_FULL - HUNTER_MIGRATION_HOOF);
   return Math.min(1, (hoof - HUNTER_MIGRATION_HOOF) / span);
+}
+
+// Mirror of _grazer_migration_chance() in rules/ecosystem.py, again expressed
+// as a share of the flat rate: how strongly the open ground on this grid is
+// drawing a grazer in from outside. It is the prey side of the same idea - a
+// predator comes when there is something to eat, a grazer comes when there is
+// somewhere to stand - and it reads the safe-ground fraction arrivalField()
+// already sweeps for, i.e. the share of tiles outside every hunter's menace
+// radius. 0 means this grid is a siege (at tick 5720 eight speed-3 hunters
+// covered every tile of it) and the world will no longer post an animal into
+// it with fifty energy on its back for the predators to take.
+function grazerDrawShare(safeFraction) {
+  if (safeFraction <= GRAZER_MIGRATION_OPEN) return 0;
+  const span = Math.max(1e-9, GRAZER_MIGRATION_FULL - GRAZER_MIGRATION_OPEN);
+  return Math.min(1, (safeFraction - GRAZER_MIGRATION_OPEN) / span);
 }
 
 // Chebyshev distance - the box-shaped metric both sense_range and flight use
@@ -789,15 +806,20 @@ function draw(now) {
   // _hunter_migration_chance in rules/ecosystem.py): below HUNTER_MIGRATION_HOOF
   // nothing comes, so the gate stops pulsing, dims to grey and is drawn latched
   // shut, and it widens and brightens again as the herd fattens toward the full
-  // rate. The grazer's door is unconditional and always drawn open.
+  // rate. As of this run the grazer's door works the same way and is drawn the
+  // same way, on the mirror-image number (see _grazer_migration_chance): a
+  // grazer is called in by room to live in rather than by the calendar, so
+  // while every tile of this grid sits inside some hunter's menace radius the
+  // prey's gate is latched shut too, and it widens as the map clears.
   const drawShare = hunterDrawShare(world.creatures || []);
+  const preyShare = grazerDrawShare(arrival.safeFraction);
   for (const species of ['grazer', 'hunter']) {
     const door = arrival.doors[species];
     if (!door) continue;
     const present = (world.creatures || []).some(c =>
       species === 'hunter' ? c.species === 'hunter' : c.species !== 'hunter');
     if (present) continue;
-    const open = species === 'hunter' ? drawShare : 1;
+    const open = species === 'hunter' ? drawShare : preyShare;
     const pulse = doorPulse * open;
     const cx = door.x * cell + cell / 2;
     const cy = door.y * cell + cell / 2;
@@ -827,7 +849,7 @@ function draw(now) {
     // comes through it until the grazers are worth coming for, and that is the
     // window a recovering herd has always needed and never had - so it should
     // be readable at a glance, not inferred from a number.
-    if (species === 'hunter' && open <= 0) {
+    if (open <= 0) {
       ctx.globalAlpha = 0.45;
       ctx.lineWidth = Math.max(0.8, cell * 0.055);
       ctx.beginPath();
@@ -1275,6 +1297,16 @@ function draw(now) {
   // is not worth the journey, and no single animal - however fat - can open it.
   const predatorDraw = hunterDrawShare(creatures);
 
+  // ...and the prey's own door, gated as of this run on the mirror of that
+  // number (see _grazer_migration_chance in rules/ecosystem.py). A grazer walks
+  // in when there is room to walk into, so "shut" means every tile of this grid
+  // lies inside some hunter's menace radius and the world will not post another
+  // animal into a siege it cannot survive. Read it directly against "safe
+  // ground", which is the number it is computed from - and against "predator
+  // draw", because between them they say which way this world is currently
+  // tilted and which species it is holding the door open for.
+  const preyDraw = grazerDrawShare(arrival.safeFraction);
+
   const carrionList = world.carrion || [];
   const edibleCount = carrionList.filter(edibleCarrion).length;
   const remainsCount = carrionList.length - edibleCount;
@@ -1319,6 +1351,8 @@ function draw(now) {
     `<span>safe ground <b>${(arrival.safeFraction * 100).toFixed(0)}%</b></span>` +
     `<span>predator draw <b>${predatorDraw > 0
       ? (predatorDraw * 100).toFixed(0) + '%' : 'shut'}</b></span>` +
+    `<span>prey draw <b>${preyDraw > 0
+      ? (preyDraw * 100).toFixed(0) + '%' : 'shut'}</b></span>` +
     `<span>carcasses <b>${edibleCount}</b></span>` +
     `<span>hunter remains <b>${remainsCount}</b></span>`;
 

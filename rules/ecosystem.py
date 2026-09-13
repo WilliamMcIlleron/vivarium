@@ -117,6 +117,18 @@ below a threshold no single animal can reach by itself, ramping up to the old
 flat rate as the herd fattens. The gate is self-clearing, because the only
 thing that opens it is a prey population doing well enough to feed whatever
 comes through it.
+
+And as of this run the prey are gated on the mirror of that: not on something
+to eat but on somewhere to stand. At tick 5720 this grid held no grazers and
+eight hunters, whose menace radii between them covered every tile of it, and
+the world was still opening a door every twenty ticks and posting fifty energy
+through it for the predators to eat - the prey side paying to keep its own
+siege going. A grazer now comes only when enough of the map lies outside every
+hunter's reach to be worth walking into (see _open_ground and
+_grazer_migration_chance). Because a hunter cannot eat another hunter's body
+(see SCAVENGEABLE_CARRION), a siege with nothing left to besiege burns out at
+its own upkeep within a few dozen ticks, so the shut door opens itself - and it
+opens onto a larder that has been ripening the whole time it was closed.
 """
 
 from __future__ import annotations
@@ -519,6 +531,50 @@ GRAZER_MIGRATION_RATE = 0.05
 HUNTER_MIGRATION_HOOF = 90    # prey worth below which no predator comes at all
 HUNTER_MIGRATION_FULL = 180   # ...and at which they come at the full old rate
 
+# How much room there has to be before a grazer makes the journey.
+#
+# Last run shut the hunters' door against an empty grid. This is the same
+# argument on the other side of the food chain, and tick 5720 is the bill for
+# having left it open: 0 grazers, 8 hunters, GRAZERS EXTINCT in twenty
+# consecutive ticks, and eight speed-3 predators whose menace radii between
+# them cover every single tile of a 40x40 map. There is nowhere on this grid a
+# grazer could stand and eat - and the world is still offering one a door every
+# twenty ticks, conjuring fifty energy out of nowhere, dropping it on the
+# least-bad tile _arrival_site can find and handing it to the animals that were
+# otherwise about to starve. Each arrival buys the predator population another
+# dozen ticks, so the prey side is paying to keep its own siege going. That is
+# the third time the same lesson has been paid for here: migration hands out
+# energy from outside, and the only question is who ends up eating it.
+#
+# So a grazer comes when there is somewhere to come to. What it reads is open
+# ground (see _open_ground): the share of the grid outside every hunter's
+# menace radius, measured with exactly the radius the migrant already picks its
+# tile by, so the gate and the choice behind it cannot drift apart. That is the
+# prey-side mirror of prey on the hoof - the one fact an animal deciding
+# whether this range is worth entering would actually care about. Below
+# GRAZER_MIGRATION_OPEN nothing comes at all; from there the chance ramps to
+# the flat GRAZER_MIGRATION_RATE this world has always used, reaching it once
+# GRAZER_MIGRATION_FULL of the map is clear.
+#
+# This is the most strongly self-clearing gate in the file, and it is
+# SCAVENGEABLE_CARRION that makes it so: hunters cannot eat their own dead, so
+# a predator population with no prey and no door bringing it any has nothing to
+# live on at all and burns out at its own upkeep within a few dozen ticks. A
+# shut door opens itself, and it opens onto ground that has been ripening the
+# whole time it was closed (see _resource_energy). No energy value moves. What
+# changes is that this world may no longer feed migrants to a predator
+# population its own budget could never have supported.
+#
+# The numbers, in animals: one hunter at speed 3 menaces about a fifth of this
+# grid, two about two fifths, four of them very nearly all of it. So one or two
+# predators is an ordinary world and the prey walk back in at the rate they
+# always did; three is a hard one they trickle into; four or more is a siege
+# they sit out. And it is the predators' SPEED that closes the door, not their
+# number - a pack of slow hunters shuts nothing, which is the same double edge
+# the menace radius already gives them.
+GRAZER_MIGRATION_OPEN = 0.15   # share of the grid free of menace below which no grazer comes
+GRAZER_MIGRATION_FULL = 0.55   # ...and at which they come at the full old rate
+
 # Where something that walks in from outside actually walks in.
 #
 # Arrival has been two calls to random.randrange since the first tick, and at
@@ -819,9 +875,14 @@ class World:
             self.creatures.append(migrant)
             self.events.append("a hunter migrates into the world")
 
+        # ...and the prey are drawn by room to live in, exactly as the
+        # predators above are drawn by something to eat. With every tile of the
+        # grid inside some hunter's menace radius there is nowhere for a
+        # migrant to be, so nothing is posted into it; the door reopens as the
+        # map clears (see _grazer_migration_chance).
         if (
             not any(c.species == "grazer" for c in self.creatures)
-            and random.random() < GRAZER_MIGRATION_RATE
+            and random.random() < _grazer_migration_chance(self.creatures)
         ):
             migrant = _spawn_creature(
                 "grazer", lineage=self.lineage.get("grazer"), origin="migrant"
@@ -1662,6 +1723,54 @@ def _hunter_migration_chance(creatures: list[Creature]) -> float:
         return 0.0
     span = max(1, HUNTER_MIGRATION_FULL - HUNTER_MIGRATION_HOOF)
     return HUNTER_MIGRATION_RATE * min(1.0, (hoof - HUNTER_MIGRATION_HOOF) / span)
+
+
+def _open_ground(creatures: list[Creature]) -> float:
+    """The share of the grid outside every hunter's menace radius: the ground a
+    grazer could actually stand on and feed, rather than stand on and flee.
+
+    This is the prey-side mirror of _prey_on_the_hoof, and it is deliberately
+    measured with the same _menace_radius an arriving grazer already chooses its
+    tile by (see _arrival_key), so what the world asks before opening the door
+    and what the migrant looks for once through it cannot drift apart.
+
+    Counted by painting each hunter's box onto the torus rather than testing
+    every tile against every hunter, and abandoned the moment the grid is
+    covered - so a world with a great many fast predators standing on it, which
+    is precisely the case this exists for, is the cheap one to evaluate.
+    """
+    hunters = [c for c in creatures if c.species == "hunter"]
+    if not hunters:
+        return 1.0
+    tiles = GRID_SIZE * GRID_SIZE
+    menaced: set[tuple[int, int]] = set()
+    for hunter in hunters:
+        # torus distance saturates at half the grid, so any reach past that
+        # covers the whole map and there is nothing further to paint.
+        reach = min(int(_menace_radius(hunter)), GRID_SIZE // 2)
+        for dx in range(-reach, reach + 1):
+            x = (hunter.x + dx) % GRID_SIZE
+            for dy in range(-reach, reach + 1):
+                menaced.add((x, (hunter.y + dy) % GRID_SIZE))
+        if len(menaced) >= tiles:
+            return 0.0
+    return 1.0 - len(menaced) / tiles
+
+
+def _grazer_migration_chance(creatures: list[Creature]) -> float:
+    """The per-tick chance a grazer walks in from outside, given how much of
+    this grid it could actually live on. Zero at or below GRAZER_MIGRATION_OPEN,
+    ramping to the flat GRAZER_MIGRATION_RATE this world has always used once
+    GRAZER_MIGRATION_FULL of the map is free of menace.
+
+    A grid with no hunters on it is entirely open and therefore behaves exactly
+    as this world always did - the gate only ever acts on a siege.
+    """
+    room = _open_ground(creatures)
+    if room <= GRAZER_MIGRATION_OPEN:
+        return 0.0
+    span = max(1e-9, GRAZER_MIGRATION_FULL - GRAZER_MIGRATION_OPEN)
+    return GRAZER_MIGRATION_RATE * min(1.0, (room - GRAZER_MIGRATION_OPEN) / span)
 
 
 def _resource_at(resources: list[Resource], x: int, y: int) -> Resource | None:
