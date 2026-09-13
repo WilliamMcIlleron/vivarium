@@ -129,10 +129,30 @@ _grazer_migration_chance). Because a hunter cannot eat another hunter's body
 (see SCAVENGEABLE_CARRION), a siege with nothing left to besiege burns out at
 its own upkeep within a few dozen ticks, so the shut door opens itself - and it
 opens onto a larder that has been ripening the whole time it was closed.
+
+And as of this run the clock on the wall is real. This world has had a
+day/night cycle since it had a viewer, and it has been a colour wash over the
+canvas and nothing else - the biggest unused surface in the file. Darkness now
+does what the canopy does, at the same place in the same subtraction: it takes
+up to NIGHT_COVER tiles off any search for something at a distance (see
+_light_level and _night_cover). That is one rule with two faces, because the
+searchers here want opposite things. A hunter loses prey in the dark, so the
+small hours are a refuge no grazer has to run to and none of them can be
+denied; but a grazer loses the plants in the dark too, so the safest time to be
+alive is also the hungriest, exactly as the safest ground is also the emptiest.
+Nothing is hidden from the thing hunting it: a grazer sees an approaching
+hunter as well at midnight as at noon, and a carcass in the open takes no
+special eye at any hour. What the night selects for is `acuity`, which cancels
+the dark point for point and has sat at 0.0 in the hunters' remembered
+bloodline since the gene was added - a predator that wants to work the night
+shift must now buy the eyes for it. And the food nobody finds between dusk and
+dawn is food left standing, which ripens (see _resource_energy), so every night
+banks a little of the next morning.
 """
 
 from __future__ import annotations
 
+import math
 import random
 import uuid
 from dataclasses import dataclass, field, asdict
@@ -644,6 +664,36 @@ TERRAIN_COVER = {"f": 1.5, "g": 0.0, "s": 0.0, "w": 0.0}
 TERRAIN_FERTILITY = {"g": 1.0, "s": 0.8, "w": 0.6, "f": 0.25}
 FERTILITY_ATTEMPTS = 12   # rejection-sampling tries before a resource lands anywhere
 
+# The dark.
+#
+# DAY_LENGTH_TICKS must match the constant of the same name in
+# viewer/index.html, which has been drawing this cycle as a wash of blue over
+# the canvas since before any of it meant anything. The curve is the world's
+# own clock - ticks, not wall time - so what a viewer sees shading the map is
+# now literally what the animals are contending with.
+#
+# NIGHT_COVER is what the hour is worth, in tiles, at the darkest point of it,
+# and it is deliberately the same 1.5 the forest canopy gives: a moonless
+# midnight is worth about as much as standing in the trees, and the two stack,
+# because they are the same kind of thing. It enters the world in exactly two
+# places - a hunter's search for live prey (see _nearest_creature) and a
+# grazer's search for a plant (see _nearest_resource) - and it is subtracted
+# from both, which is the whole design. A concealment that only hid the prey
+# would be a flat half-time buff on a timer; one that hides the larder too is a
+# tradeoff with a clock on it, and it is the same tradeoff the map already
+# makes in space (the safest ground grows nearly nothing) expressed for the
+# first time in TIME.
+#
+# Three things are deliberately left alone. A grazer's view of an approaching
+# hunter is untouched, exactly as the canopy never hid a hunter from its prey -
+# concealment in this world has only ever applied on the predator's
+# prey-detection path. Carrion is untouched, because the scavenging lifeline is
+# what ended the chronic hunter extinctions and a body in the open takes no
+# special eye to find. And no energy value moves: the night does not destroy
+# food, it postpones it, and postponed food ripens.
+DAY_LENGTH_TICKS = 48
+NIGHT_COVER = 1.5
+
 # Extensible genome: name -> (default, mutation_step, min, max). speed and
 # sense_range stay first-class Creature fields since core movement code
 # reads them directly everywhere - this registry is for ADDITIONAL traits,
@@ -905,6 +955,11 @@ class World:
         # herd as it was when the tick began rather than half-updated.
         _update_herd_cover(grazers)
 
+        # ...and what hour it is. One number for the whole grid, read once:
+        # what the dark takes off a hunter looking for prey and off a grazer
+        # looking for a plant (see _night_cover).
+        dark = _night_cover(self.tick)
+
         # movement: hunters head for whichever is closer, the nearest grazer
         # or the nearest carcass they can actually eat - live prey is worth
         # more but runs away, carrion is worth less but holds still. A dead
@@ -923,18 +978,24 @@ class World:
         # predators better" - no separate dial. What it no longer trades off
         # against is the animal's own nerve: perceiving a hunter and running
         # from it are two different questions now.
-        # Layered on top of that, four things pull on the hunter's
+        # Layered on top of that, five things pull on the hunter's
         # prey-detection number and nothing else: a grazer's `camouflage`, its
-        # herd cover and the canopy over the tile it's standing on all
-        # subtract from the hunter's effective sense_range, and the hunter's
-        # `acuity` adds back to it. None of them does anything for a carcass:
-        # hiding is a behaviour of the living, and a body in the open takes no
-        # special eye to find.
+        # herd cover, the canopy over the tile it's standing on and, as of this
+        # run, the hour of the night all subtract from the hunter's effective
+        # sense_range, and the hunter's `acuity` adds back to it. None of them
+        # does anything for a carcass: hiding is a behaviour of the living, a
+        # body in the open takes no special eye to find, and the scavenging
+        # lifeline that ended the chronic hunter extinctions keeps working at
+        # every hour of the day.
         for creature in self.creatures:
             creature.age += 1
             if creature.species == "hunter":
                 prey = _nearest_creature(
-                    creature, grazers, camouflage_aware=True, terrain=self.terrain
+                    creature,
+                    grazers,
+                    camouflage_aware=True,
+                    terrain=self.terrain,
+                    dark=dark,
                 )
                 carcass = _nearest_carrion(creature, self.carrion)
                 target = _closer_target(creature, prey, carcass)
@@ -947,7 +1008,7 @@ class World:
                 if threat is not None:
                     _move_away(creature, threat, self.terrain)
                 else:
-                    target = _nearest_resource(creature, self.resources)
+                    target = _nearest_resource(creature, self.resources, dark)
                     companion = _herd_target(creature, grazers, target)
                     if companion is not None:
                         _move_toward(creature, companion)
@@ -1134,6 +1195,29 @@ def _terrain_at(terrain: list[str] | None, x: int, y: int) -> str:
 def _cover_at(terrain: list[str] | None, x: int, y: int) -> float:
     """How much this tile hides whatever is standing on it (TERRAIN_COVER)."""
     return TERRAIN_COVER.get(_terrain_at(terrain, x, y), 0.0)
+
+
+def _light_level(tick: int) -> float:
+    """How much light is on this world right now: 0 at midnight, 1 at midday,
+    on a smooth cosine over DAY_LENGTH_TICKS ticks. Identical to the curve
+    viewer/index.html has been shading the canvas with all along.
+    """
+    phase = (tick % DAY_LENGTH_TICKS) / DAY_LENGTH_TICKS
+    return (1.0 - math.cos(phase * 2.0 * math.pi)) / 2.0
+
+
+def _night_cover(tick: int) -> float:
+    """How many tiles the dark takes off a search for something at a distance
+    this tick: nothing at midday, NIGHT_COVER at midnight.
+
+    One number subtracted in two opposite directions - it hides a grazer from a
+    hunter and it hides a plant from a grazer - which is what keeps the night
+    from being a flat gift to the prey. `acuity` cancels it for a predator the
+    same way it cancels camouflage, herd cover and canopy; nothing cancels it
+    for a grazer looking for its dinner, so the only answer prey have to a dark
+    larder is to have eaten while it was light.
+    """
+    return NIGHT_COVER * (1.0 - _light_level(tick))
 
 
 def _forage_location(terrain: list[str] | None) -> tuple[int, int]:
@@ -1496,11 +1580,22 @@ def _herd_target(
     return companion if random.random() < gregariousness / hi else None
 
 
-def _nearest_resource(creature: Creature, resources: list[Resource]) -> Resource | None:
+def _nearest_resource(
+    creature: Creature, resources: list[Resource], dark: float = 0.0
+) -> Resource | None:
+    """The plant this creature can see and will walk to. `dark` is what the
+    hour takes off its reach (see _night_cover): a plant is not hiding, but in
+    the small hours nobody picks one out at ten tiles, so the same number that
+    conceals a grazer from a hunter also keeps that grazer from finding its
+    dinner - the cost of the refuge, charged in missed meals rather than in
+    energy, exactly as the canopy's is. Defaults to broad daylight, so anything
+    calling this without a clock behaves as this world always did.
+    """
+    reach = max(0.0, creature.sense_range - dark)
     in_range = [
         r for r in resources
-        if abs(r.x - creature.x) <= creature.sense_range
-        and abs(r.y - creature.y) <= creature.sense_range
+        if abs(r.x - creature.x) <= reach
+        and abs(r.y - creature.y) <= reach
     ]
     if not in_range:
         return None
@@ -1552,16 +1647,21 @@ def _nearest_creature(
     others: list[Creature],
     camouflage_aware: bool = False,
     terrain: list[str] | None = None,
+    dark: float = 0.0,
 ) -> Creature | None:
     # camouflage_aware is only passed True for a hunter scanning for grazers.
-    # It's the predator/prey detection path, and four things pull on the same
-    # number there: each candidate's own camouflage, its herd cover AND the
-    # canopy over the tile it's standing on shrink the searching creature's
-    # effective sense_range just for that candidate, and the searcher's own
-    # acuity adds back to it. So a well-hidden grazer - by pigment, by
-    # company, by standing in the trees, or all three - can be well inside a
-    # hunter's nominal sense_range and still go undetected, unless that hunter
-    # is paying (in energy every tick, see ACUITY_COST) to see through it.
+    # It's the predator/prey detection path, and FIVE things pull on the same
+    # number there: each candidate's own camouflage, its herd cover, the canopy
+    # over the tile it's standing on AND the hour of the night (see
+    # _night_cover) shrink the searching creature's effective sense_range, and
+    # the searcher's own acuity adds back to it. So a well-hidden grazer - by
+    # pigment, by company, by standing in the trees, by the dark, or all four -
+    # can be well inside a hunter's nominal sense_range and still go
+    # undetected, unless that hunter is paying (in energy every tick, see
+    # ACUITY_COST) to see through it. The dark is the only one of the five that
+    # no grazer has to do anything to earn and none of them can be denied, and
+    # the only one that costs the prey something on its own account, because
+    # the same darkness hides the plants (see _nearest_resource).
     # Grazers scanning for hunter threats, and grazers looking for each other,
     # are unaffected (camouflage_aware defaults to False), so none of this
     # ever helps the side it wasn't meant for - a hunter in the forest is as
@@ -1577,6 +1677,7 @@ def _nearest_creature(
             - other.trait("camouflage")
             - other.herd_cover
             - _cover_at(terrain, other.x, other.y)
+            - dark
             + creature.trait("acuity"),
         )
 

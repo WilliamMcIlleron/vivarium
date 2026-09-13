@@ -42,8 +42,10 @@ probably the one not to make.
   drifting fog. The MAP is fixed "engine" scaffolding - don't regenerate or
   redesign the terrain itself - but it is no longer inert: as of tick 1889,
   forest canopy conceals a grazer from hunters and biome fertility decides
-  where resources grow (`TERRAIN_COVER` / `TERRAIN_FERTILITY`). The day/night
-  cycle and fog are still purely cosmetic.
+  where resources grow (`TERRAIN_COVER` / `TERRAIN_FERTILITY`). As of tick
+  5984 the day/night cycle is mechanical too: darkness subtracts from a
+  hunter's search for live prey and from a grazer's search for food alike
+  (`NIGHT_COVER`, `_light_level`). The drifting fog is still purely cosmetic.
 - The ecosystem now has two species (`rules/ecosystem.py`): grazers (eat resources)
   and hunters (eat grazers, flee-and-chase movement, faster but harder to reproduce).
   Grazers detect hunters using the same `sense_range` gene they use to find food -
