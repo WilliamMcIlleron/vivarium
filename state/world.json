@@ -1,251 +1,236 @@
 {
-  "tick": 6051,
-  "creatures": [
-    {
-      "id": "84c94b3d-e68b-4e24-9cdc-e782be2b8f1d",
-      "x": 31,
-      "y": 33,
-      "energy": 33,
-      "speed": 3,
-      "sense_range": 7,
-      "species": "hunter",
-      "age": 73,
-      "traits": {
-        "camouflage": 0.0,
-        "acuity": 0.0,
-        "gregariousness": 0.5,
-        "nerve": 0.0,
-        "provisioning": 0.0
-      },
-      "origin": "born",
-      "herd_cover": 0.0
-    },
-    {
-      "id": "21ee58ec-59f5-4e92-8668-4d9d6b2734e3",
-      "x": 19,
-      "y": 4,
-      "energy": 10,
-      "speed": 3,
-      "sense_range": 7,
-      "species": "hunter",
-      "age": 51,
-      "traits": {
-        "camouflage": 0.0,
-        "acuity": 0.0,
-        "gregariousness": 0.5,
-        "nerve": 0.0,
-        "provisioning": 0.0
-      },
-      "origin": "born",
-      "herd_cover": 0.0
-    }
-  ],
+  "tick": 6117,
+  "creatures": [],
   "resources": [
     {
-      "x": 31,
-      "y": 29,
-      "age": 56
-    },
-    {
-      "x": 25,
+      "x": 1,
       "y": 4,
-      "age": 45
+      "age": 43
     },
     {
-      "x": 16,
-      "y": 39,
-      "age": 41
+      "x": 6,
+      "y": 2,
+      "age": 36
     },
     {
-      "x": 28,
-      "y": 31,
-      "age": 38
-    },
-    {
-      "x": 36,
-      "y": 10,
-      "age": 35
-    },
-    {
-      "x": 3,
-      "y": 3,
-      "age": 34
-    },
-    {
-      "x": 22,
-      "y": 7,
-      "age": 29
-    },
-    {
-      "x": 34,
-      "y": 0,
-      "age": 28
-    },
-    {
-      "x": 32,
-      "y": 29,
-      "age": 26
+      "x": 19,
+      "y": 2,
+      "age": 33
     },
     {
       "x": 37,
-      "y": 23,
-      "age": 24
+      "y": 12,
+      "age": 29
     },
     {
-      "x": 17,
-      "y": 32,
-      "age": 21
-    },
-    {
-      "x": 17,
-      "y": 31,
-      "age": 19
-    },
-    {
-      "x": 17,
-      "y": 13,
-      "age": 17
-    },
-    {
-      "x": 28,
-      "y": 36,
-      "age": 15
-    },
-    {
-      "x": 15,
-      "y": 13,
-      "age": 14
-    },
-    {
-      "x": 0,
-      "y": 11,
-      "age": 11
-    },
-    {
-      "x": 15,
-      "y": 9,
-      "age": 10
-    },
-    {
-      "x": 26,
-      "y": 20,
-      "age": 7
+      "x": 7,
+      "y": 2,
+      "age": 25
     },
     {
       "x": 38,
-      "y": 19,
-      "age": 5
+      "y": 18,
+      "age": 16
     },
     {
-      "x": 32,
-      "y": 6,
-      "age": 4
-    },
-    {
-      "x": 2,
-      "y": 11,
-      "age": 3
-    },
-    {
-      "x": 32,
-      "y": 17,
-      "age": 2
-    },
-    {
-      "x": 14,
+      "x": 34,
       "y": 27,
+      "age": 11
+    },
+    {
+      "x": 20,
+      "y": 35,
+      "age": 10
+    },
+    {
+      "x": 31,
+      "y": 15,
+      "age": 7
+    },
+    {
+      "x": 23,
+      "y": 35,
+      "age": 6
+    },
+    {
+      "x": 39,
+      "y": 19,
       "age": 1
     },
     {
-      "x": 1,
-      "y": 3,
+      "x": 18,
+      "y": 24,
       "age": 0
     }
   ],
   "carrion": [
     {
-      "x": 31,
-      "y": 5,
+      "x": 32,
+      "y": 17,
+      "age": 37,
+      "species": "grazer",
+      "energy": 0
+    },
+    {
+      "x": 36,
+      "y": 10,
       "age": 34,
-      "species": "hunter"
-    },
-    {
-      "x": 23,
-      "y": 35,
-      "age": 32,
-      "species": "hunter"
-    },
-    {
-      "x": 33,
-      "y": 8,
-      "age": 32,
-      "species": "hunter"
-    },
-    {
-      "x": 3,
-      "y": 6,
-      "age": 25,
-      "species": "hunter"
-    },
-    {
-      "x": 38,
-      "y": 13,
-      "age": 25,
-      "species": "hunter"
-    },
-    {
-      "x": 37,
-      "y": 6,
-      "age": 17,
-      "species": "hunter"
-    },
-    {
-      "x": 4,
-      "y": 29,
-      "age": 16,
-      "species": "grazer"
+      "species": "grazer",
+      "energy": 0
     },
     {
       "x": 32,
-      "y": 7,
-      "age": 14,
-      "species": "hunter"
+      "y": 25,
+      "age": 33,
+      "species": "grazer",
+      "energy": 0
     },
     {
-      "x": 31,
-      "y": 15,
-      "age": 14,
-      "species": "hunter"
+      "x": 36,
+      "y": 0,
+      "age": 31,
+      "species": "grazer",
+      "energy": 0
     },
     {
-      "x": 0,
-      "y": 35,
-      "age": 9,
-      "species": "grazer"
+      "x": 38,
+      "y": 19,
+      "age": 31,
+      "species": "grazer",
+      "energy": 0
     },
     {
-      "x": 3,
+      "x": 34,
+      "y": 0,
+      "age": 30,
+      "species": "grazer",
+      "energy": 0
+    },
+    {
+      "x": 32,
+      "y": 29,
+      "age": 28,
+      "species": "grazer",
+      "energy": 0
+    },
+    {
+      "x": 34,
+      "y": 0,
+      "age": 28,
+      "species": "grazer",
+      "energy": 0
+    },
+    {
+      "x": 34,
+      "y": 0,
+      "age": 28,
+      "species": "grazer",
+      "energy": 0
+    },
+    {
+      "x": 34,
+      "y": 0,
+      "age": 27,
+      "species": "grazer",
+      "energy": 0
+    },
+    {
+      "x": 34,
+      "y": 0,
+      "age": 27,
+      "species": "grazer",
+      "energy": 0
+    },
+    {
+      "x": 23,
+      "y": 33,
+      "age": 26,
+      "species": "grazer",
+      "energy": 0
+    },
+    {
+      "x": 10,
       "y": 38,
-      "age": 9,
-      "species": "grazer"
+      "age": 20,
+      "species": "grazer",
+      "energy": 0
     },
     {
-      "x": 21,
-      "y": 26,
+      "x": 17,
+      "y": 37,
+      "age": 20,
+      "species": "grazer",
+      "energy": 0
+    },
+    {
+      "x": 10,
+      "y": 38,
+      "age": 19,
+      "species": "grazer",
+      "energy": 0
+    },
+    {
+      "x": 8,
+      "y": 38,
+      "age": 19,
+      "species": "grazer",
+      "energy": 0
+    },
+    {
+      "x": 11,
+      "y": 38,
+      "age": 19,
+      "species": "grazer",
+      "energy": 0
+    },
+    {
+      "x": 17,
+      "y": 37,
+      "age": 19,
+      "species": "grazer",
+      "energy": 0
+    },
+    {
+      "x": 11,
+      "y": 38,
+      "age": 18,
+      "species": "grazer",
+      "energy": 0
+    },
+    {
+      "x": 14,
+      "y": 21,
       "age": 8,
-      "species": "hunter"
+      "species": "grazer",
+      "energy": 0
     },
     {
-      "x": 0,
-      "y": 35,
-      "age": 8,
-      "species": "grazer"
+      "x": 13,
+      "y": 14,
+      "age": 4,
+      "species": "grazer",
+      "energy": 0
     },
     {
-      "x": 33,
-      "y": 39,
-      "age": 5,
-      "species": "hunter"
+      "x": 13,
+      "y": 14,
+      "age": 2,
+      "species": "grazer",
+      "energy": 0
+    },
+    {
+      "x": 13,
+      "y": 14,
+      "age": 2,
+      "species": "grazer",
+      "energy": 0
+    },
+    {
+      "x": 11,
+      "y": 13,
+      "age": 1,
+      "species": "grazer",
+      "energy": 0
     }
   ],
   "lineage": {
@@ -254,34 +239,25 @@
         "speed": 6,
         "sense_range": 10,
         "camouflage": 0.5,
-        "acuity": 3.0,
-        "gregariousness": 0.5,
-        "nerve": 1.5,
+        "acuity": 2.5,
+        "gregariousness": 1.0,
+        "nerve": 2.0,
         "provisioning": 0.0
       },
       {
         "speed": 6,
         "sense_range": 10,
         "camouflage": 0.5,
-        "acuity": 3.0,
-        "gregariousness": 0.5,
-        "nerve": 1.5,
+        "acuity": 2.5,
+        "gregariousness": 1.5,
+        "nerve": 2.0,
         "provisioning": 0.0
       },
       {
         "speed": 6,
         "sense_range": 10,
         "camouflage": 0.5,
-        "acuity": 3.0,
-        "gregariousness": 0.5,
-        "nerve": 1.5,
-        "provisioning": 0.0
-      },
-      {
-        "speed": 6,
-        "sense_range": 10,
-        "camouflage": 0.5,
-        "acuity": 3.0,
+        "acuity": 2.5,
         "gregariousness": 1.0,
         "nerve": 2.0,
         "provisioning": 0.0
@@ -292,7 +268,7 @@
         "camouflage": 0.5,
         "acuity": 2.5,
         "gregariousness": 1.0,
-        "nerve": 1.5,
+        "nerve": 2.0,
         "provisioning": 0.0
       },
       {
@@ -301,7 +277,7 @@
         "camouflage": 0.5,
         "acuity": 2.5,
         "gregariousness": 1.0,
-        "nerve": 1.5,
+        "nerve": 2.0,
         "provisioning": 0.0
       },
       {
@@ -310,7 +286,7 @@
         "camouflage": 0.5,
         "acuity": 2.5,
         "gregariousness": 1.0,
-        "nerve": 1.5,
+        "nerve": 2.0,
         "provisioning": 0.0
       },
       {
@@ -319,7 +295,16 @@
         "camouflage": 0.5,
         "acuity": 2.5,
         "gregariousness": 1.0,
-        "nerve": 1.5,
+        "nerve": 2.0,
+        "provisioning": 0.0
+      },
+      {
+        "speed": 6,
+        "sense_range": 10,
+        "camouflage": 0.5,
+        "acuity": 2.5,
+        "gregariousness": 1.0,
+        "nerve": 2.0,
         "provisioning": 0.0
       }
     ],
@@ -440,7 +425,7 @@
     "ggggggggssssswwsgggggggggggggffffggggggg",
     "ggggggggsssgswwsgggggggggggggffffggggggg"
   ],
-  "population": 2,
+  "population": 0,
   "grazers": 0,
-  "hunters": 2
+  "hunters": 0
 }

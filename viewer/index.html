@@ -180,6 +180,7 @@
     <span class="swatch"><span class="ring" style="border-color:var(--hunter-high);border-style:dashed"></span>menace (the wide sparse ring: how much ground this hunter's speed alone clears of feeding grazers, whether or not it ever catches one)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--nightfall);border-style:dotted"></span>nightfall (the cold indigo ring, on both species, appearing only once the light goes: what this animal can actually FIND in the present hour. The day/night wash is no longer decoration - darkness takes up to 1.5 tiles off a hunter's search for live prey, exactly the way the canopy does, and off a grazer's search for a plant, so the safest hours to be prey are also the hungriest ones. A grazer still sees an approaching hunter perfectly well at midnight, a carcass still takes no special eye to find, and the plants nobody finds in the dark stand and ripen until morning. Acuity is a predator's night vision: it is the only thing that buys the dark back.)</span>
     <span class="swatch"><span class="dot" style="background:var(--resource)"></span>resource (grows where light reaches the ground, so it clusters in the open - and fattens the longer nobody eats it: small and dark is freshly sprouted and worth what a resource here has always been worth, big and pale is a plant that has stood a hundred ticks, ringed once it can grow no further)</span>
+    <span class="swatch"><span class="dot" style="background:rgba(232,192,125,0.22);width:12px;height:12px"></span>grove (the soft amber haze: ground a standing plant can actually sow. A resource left alone for ten ticks sows the next one within three tiles of itself, so food grows in patches instead of an even sprinkle over sixteen hundred tiles - and a population eating every plant the tick it sprouts never lets one reach seed at all, and lives on the flat scatter this world always had. Overlapping haze is a grove, dense and ripe enough for a newborn to feed on the tile it was born on; a bare diamond with no haze is a plant that will be eaten before it ever reproduces.)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--carrion)"></span>carcass (a grazer's body - the only carrion a hunter can eat; fades as it rots, and as of this run its SIZE and its orange quarry rim are what a scavenger would actually bank for it. A carcass used to be a flat 30 whatever condition the animal fell in, so a grazer the hunters had starved was worth four times more to them dead than alive; a body is worth the body now, which makes a starveling's corpse a bare speck and an old animal that died fat a genuine windfall.)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--carrion-inedible);border-style:dotted"></span>hunter remains (crossed out: predators no longer live off their own dead, so this is scenery)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--migrant);border-style:dashed"></span>migrant (just arrived, carries remembered genes)</span>
@@ -215,6 +216,8 @@ const PROVISION_ENERGY = 6;    // must match PROVISION_ENERGY in rules/ecosystem
 const RESOURCE_ENERGY = 30;      // must match RESOURCE_ENERGY - what a plant is worth the tick it sprouts
 const RESOURCE_RIPEN_TICKS = 2;  // must match RESOURCE_RIPEN_TICKS - ticks of undisturbed growth per extra energy
 const RESOURCE_MAX_ENERGY = 75;  // must match RESOURCE_MAX_ENERGY - where a plant stops putting on weight
+const SEED_MATURITY = 10;        // must match SEED_MATURITY - ticks a plant must stand before it can sow another
+const SEED_RADIUS = 3;           // must match SEED_RADIUS - how far a seed falls from its parent
 const HUNT_FLESH = 12;         // must match HUNT_FLESH - what a body is worth whatever shape it was in
 const HUNT_EFFICIENCY = 0.7;   // must match HUNT_EFFICIENCY - the share of a meal a predator actually banks
 const HUNT_MAX_ENERGY = 70;    // must match HUNT_MAX_ENERGY - ceiling on a single sitting
@@ -746,6 +749,28 @@ function draw(now) {
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   drawTerrain(world.terrain);
+
+  // groves: the ground each seed-bearing plant can actually sow. A resource
+  // that has stood SEED_MATURITY ticks sows the next one within SEED_RADIUS
+  // tiles of itself (see _seed_location in rules/ecosystem.py), so this world's
+  // food finally has a spatial structure - it clumps wherever it is left alone
+  // and reverts to the old even sprinkle wherever it is being eaten young,
+  // which is the whole feedback. Drawn as a very faint amber disc per mature
+  // plant, deliberately accumulative: one alone is a ghost, and a patch of
+  // overlapping ones reads as a single glowing field of fertile ground. The
+  // total spawn rate is untouched, so this marks where the next plant is
+  // likely to appear and never how many there will be.
+  ctx.fillStyle = '#e8c07d';
+  for (const r of world.resources || []) {
+    if ((r.age || 0) < SEED_MATURITY) continue;
+    ctx.globalAlpha = 0.04;
+    ctx.beginPath();
+    ctx.arc(
+      r.x * cell + cell / 2, r.y * cell + cell / 2,
+      (SEED_RADIUS + 0.5) * cell, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
 
   // resources: small diamonds, and as of this run they are no longer all the
   // same diamond. Food still grows where light reaches the ground
@@ -1377,6 +1402,17 @@ function draw(now) {
   const larder = (world.resources || []).reduce(
     (sum, r) => sum + resourceEnergy(r), 0);
 
+  // How many of those plants are old enough to sow another (see SEED_MATURITY
+  // in rules/ecosystem.py). Read it against "resources": a decent count with
+  // almost nothing in seed is a larder being eaten as fast as it appears, and
+  // a world whose food is back to a uniform random scatter; a high count WITH
+  // a high seed count is grove country, where a grazer that finds one patch
+  // can feed a newborn off the tile it was born on. It is the prey side's
+  // version of "prey on the hoof" - not how much food is standing, but how
+  // much of it is making more.
+  const inSeed = (world.resources || [])
+    .filter(r => (r.age || 0) >= SEED_MATURITY).length;
+
   // The predators' larder: what the whole grazer population is currently worth
   // if it were caught (see _kill_value in rules/ecosystem.py). Read it against
   // "larder", the energy standing on the ground, because they are now the same
@@ -1461,6 +1497,7 @@ function draw(now) {
     `<span>brood stake <b>${broodAvg.toFixed(1)}</b></span>` +
     `<span>resources <b>${(world.resources || []).length}</b></span>` +
     `<span>larder <b>${larder}</b></span>` +
+    `<span>in seed <b>${inSeed}</b></span>` +
     `<span>prey on the hoof <b>${onTheHoof}</b></span>` +
     `<span>safe ground <b>${(arrival.safeFraction * 100).toFixed(0)}%</b></span>` +
     `<span>predator draw <b>${predatorDraw > 0

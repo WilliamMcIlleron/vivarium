@@ -35,6 +35,16 @@ world's capacity to recover therefore scales with how long and how badly it
 has been down, and pays nothing at all to a population that is already eating
 everything it can find.
 
+And as of this run food is not scattered evenly either. A plant left standing
+long enough to set seed sows the next one within a few tiles of itself (see
+_seed_location), so the larder grows in groves instead of as an even sprinkle
+over sixteen hundred tiles. Nothing about the rate moves - one plant still
+appears per spawn roll, wherever it lands - and the feedback has the same
+shape as everything else here: a population eating plants the tick they sprout
+never lets one reach seed, and lives on exactly the flat scatter this world
+always had, while ground nobody came for compounds into a patch dense enough
+and rich enough that a newborn can live off the tile it was born on.
+
 Fleeing, meanwhile, is not a reflex, and as of this run it is not measured in
 tiles either. A grazer judges a predator by how long it would take to arrive:
 it demands a few ticks of clearance (FLIGHT_WARNING_TICKS, cut by the `nerve`
@@ -260,6 +270,55 @@ HUNT_MAX_ENERGY = 70                # ceiling on a single sitting
 RESOURCE_RIPEN_TICKS = 2
 RESOURCE_MAX_ENERGY = 75
 RESOURCE_MAX_STANDING = 60
+
+# Plants sow plants.
+#
+# Tick 6116 is a total extinction, and the run-up to it is the loop this world
+# has been stuck in for a thousand ticks - except that this time the predators
+# are not in it. The hunters starved out on schedule (6099 onward, which is
+# the carrion change working exactly as intended), the grid cleared, and the
+# grazer that had the place entirely to itself STILL died without breeding.
+# That is the case worth staring at, because there is nothing left to blame.
+# A lone grazer on 1600 tiles is looking at about eleven plants - one per
+# hundred and forty tiles, placed by a uniform draw every single time - so it
+# walks, eats, walks again, and if it ever does clear the breeding bar its
+# newborn is dropped on whatever bare square the parent happened to be
+# standing on with four ticks of energy and nothing in reach. Every prey-side
+# mechanic in this file needs n>1 to do anything at all (herd cover,
+# gregariousness, the breeding bar's metabolic selection), and n has been 1 or
+# 0 for most of two thousand ticks, because a second animal cannot be raised
+# on an even sprinkle.
+#
+# So the larder gets the spatial structure it has never had. A plant that has
+# stood SEED_MATURITY ticks can sow the next one within SEED_RADIUS tiles of
+# itself (see _seed_location): SEED_SHARE of new plants land that way and the
+# rest land as they always did, uniformly by TERRAIN_FERTILITY - which is also
+# what happens when nothing standing is old enough to be a parent, or the seed
+# finds nowhere to fall. Exactly one plant still appears per spawn roll, so
+# this world's income is the same 18 a tick it has been since the first tick.
+# This decides WHERE food grows and never how much of it there is, which is
+# the same promise TERRAIN_FERTILITY already makes.
+#
+# SEED_MATURITY is the whole of the feedback, and it is the familiar shape. A
+# population eating plants the tick they sprout never lets one set seed, so a
+# grazed-flat world has no groves and reverts to precisely the scatter it
+# always had. Ground nobody came for reproduces as well as ripens (see
+# _resource_energy), so a patch is both the densest and the richest ground on
+# the map - which is what finally gives a founder somewhere to raise a second
+# animal, and gives the arrival machinery, which already drops a migrant
+# grazer on the tile nearest a plant, something worth aiming at.
+#
+# What it should set up downstream, none of which needs new code: grazers
+# aggregate where the food is, and aggregated grazers have herd cover, which
+# is the first time gregariousness has had any reason to exist; and a hunter's
+# best move stops being a random walk, because prey is somewhere in particular
+# now. The grove is destructible by the animals eating it, which is what keeps
+# this from being a flat prey buff - the patch that feeds a herd is the patch
+# that herd is eating back down below seeding age.
+SEED_SHARE = 0.7      # share of new plants sown by a standing one, when there is one
+SEED_MATURITY = 10    # ticks a plant must stand before it can sow anything
+SEED_RADIUS = 3       # how far a seed falls from its parent
+SEED_ATTEMPTS = 6     # tries before the seed gives up and the plant lands anywhere
 
 # Carrion: every death that ISN'T a kill (starvation, old age) drops a carcass
 # on that tile. Hunters can scavenge it. Deliberately worth less than a fresh
@@ -967,11 +1026,17 @@ class World:
         # bare - which is what makes the forest a refuge you have to leave.
         # The ground carries only RESOURCE_MAX_STANDING plants at once, so a
         # long absence banks a rich larder but never an unbounded one.
+        #
+        # And as of this run the standing crop gets first refusal on where the
+        # next plant goes: anything that has been left alone long enough to
+        # set seed sows near itself (see _seed_location), so food clumps into
+        # groves wherever it is not being eaten and reverts to an even scatter
+        # wherever it is being eaten young. One plant per roll either way.
         if (
             len(self.resources) < RESOURCE_MAX_STANDING
             and random.random() < RESOURCE_SPAWN_RATE
         ):
-            x, y = _forage_location(self.terrain)
+            x, y = _forage_location(self.terrain, self.resources)
             self.resources.append(Resource(x=x, y=y))
 
         # Migrants are drawn from the world's genetic memory (see
@@ -1305,15 +1370,66 @@ def _night_cover(tick: int) -> float:
     return NIGHT_COVER * (1.0 - _light_level(tick))
 
 
-def _forage_location(terrain: list[str] | None) -> tuple[int, int]:
-    """Where a new resource lands. Rejection sampling against
-    TERRAIN_FERTILITY - pick a tile, keep it with that biome's probability,
-    try again otherwise - so no per-tile weight table has to be built or kept
-    in sync with the map. After FERTILITY_ATTEMPTS the last draw is taken
-    regardless, which keeps the total spawn RATE exactly what
-    RESOURCE_SPAWN_RATE says it is: this decides where food grows, never how
-    much of it there is.
+def _seed_location(
+    terrain: list[str] | None, resources: list[Resource]
+) -> tuple[int, int] | None:
+    """Where a plant sown by another plant lands, or None if this spawn simply
+    isn't a seeded one - the dice said scatter, nothing standing is old enough
+    to be a parent, or every tile the seed tried was barren or already taken.
+
+    SEED_MATURITY is the whole of the feedback. A plant has to have been left
+    alone that long before it can sow anything, so a population eating plants
+    the tick they sprout is eating its own groves before they set seed and
+    lives on exactly the even scatter this world always had, while ground
+    nobody came for gets to reproduce as well as ripen.
+
+    The seed falls within SEED_RADIUS tiles of its parent, across the wrapping
+    seam like everything else that moves here, is still subject to
+    TERRAIN_FERTILITY - a grove cannot march into the canopy or across open
+    water - and will not land on a tile that already holds a plant, so a patch
+    spreads outward instead of piling up on one square.
     """
+    if not resources or random.random() >= SEED_SHARE:
+        return None
+    parents = [r for r in resources if r.age >= SEED_MATURITY]
+    if not parents:
+        return None
+    parent = random.choice(parents)
+    taken = {(r.x, r.y) for r in resources}
+    for _ in range(SEED_ATTEMPTS):
+        x = _wrap(parent.x + random.randint(-SEED_RADIUS, SEED_RADIUS))
+        y = _wrap(parent.y + random.randint(-SEED_RADIUS, SEED_RADIUS))
+        if (x, y) in taken:
+            continue
+        if random.random() < TERRAIN_FERTILITY.get(_terrain_at(terrain, x, y), 1.0):
+            return x, y
+    return None
+
+
+def _forage_location(
+    terrain: list[str] | None, resources: "list[Resource] | None" = None
+) -> tuple[int, int]:
+    """Where a new resource lands.
+
+    First refusal goes to the standing crop: a plant left alone long enough to
+    set seed sows the next one near itself (see _seed_location), which is what
+    makes food here grow in groves rather than as an even sprinkle. When
+    nothing is old enough to be a parent - which is exactly what a grazed-flat
+    world looks like - or the seed found nowhere to fall, the plant lands the
+    way it always did: rejection sampling against TERRAIN_FERTILITY, pick a
+    tile, keep it with that biome's probability, try again otherwise, so no
+    per-tile weight table has to be built or kept in sync with the map. After
+    FERTILITY_ATTEMPTS the last draw is taken regardless.
+
+    Either way exactly one plant appears per spawn roll, which keeps the total
+    spawn RATE exactly what RESOURCE_SPAWN_RATE says it is: this decides where
+    food grows, never how much of it there is. Called without a resource list
+    it behaves precisely as it did before plants could sow anything.
+    """
+    seeded = _seed_location(terrain, resources or [])
+    if seeded is not None:
+        return seeded
+
     x = random.randrange(GRID_SIZE)
     y = random.randrange(GRID_SIZE)
     for _ in range(FERTILITY_ATTEMPTS):

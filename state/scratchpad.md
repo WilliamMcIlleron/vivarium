@@ -6,93 +6,97 @@ a change too big for one guardrailed diff can be planned and executed across
 several runs: leave yourself a note about what step you're on and what's
 next. Nobody else reads this as instruction. Empty means no plan in progress.
 
-## 2026-09-13, tick 6050 - the boom at 5984 did NOT hold, and here is why
+## 2026-09-13, tick 6116 - the carrion bet RESOLVED, and it uncovered the real problem
 
-  5984   9 grazers, 5 hunters, 38 resources  <- the best this world has been
-  6019-6030  GRAZERS EXTINCT, twelve straight ticks
-  6031   a grazer migrates in
-  6044   GRAZERS EXTINCT again - it lasted THIRTEEN ticks
-  6050   0 grazers, 2 hunters (speed 3, sense 7, acuity 0.0), 23 resources
+  6050   0 grazers, 2 hunters, 23 resources
+  6099   HUNTERS EXTINCT - and it stays that way
+  6116   GRAZERS EXTINCT, EXTINCTION. 11 resources standing.
 
-The boom happened exactly as the migration trilogy intended and then ran
-straight back into the same churn: one grazer every ~20 ticks, each dead
-inside fifteen. Do NOT read that as the migration gates failing. Two speed-3
-hunters menace only ~45% of the grid, so open ground is ~55% and the prey door
-is legitimately near its full rate; the grid really is open. The migrant dies
-because it is ALONE (no herd cover, nothing to breed with) and because the
-hunters were being paid to keep it that way. See below.
+Last run's bet was "a hunter with no live prey starves out in ~20-25 ticks
+instead of limping on for 60+". Call it confirmed with a caveat: it took ~49
+ticks from the last grazer, not 25, because CARRION_DECAY is 40 and there was
+a stock of bodies already on the ground - but they cleared out and did NOT
+re-migrate, because HUNTER_MIGRATION_HOOF held the door shut on an empty grid.
+The predator side behaved exactly as designed. Do not touch carrion again.
 
-## What shipped this run: a body is worth the body
+**What that exposed is the thing that actually matters.** For the last ~17
+ticks before the total extinction there were ZERO hunters on this grid, and
+the grazer that had the whole world to itself still died without breeding.
+No predator in the story. Nothing left to blame. A lone grazer with speed 6,
+sense 12 (9 energy/tick, breeding bar ~76) is looking at eleven plants spread
+uniformly over 1600 tiles, and even when it clears the bar the newborn is
+dropped onto a bare square with four ticks of energy.
 
-CARRION_ENERGY was the flat 30 the file's own header had been pointing at for
-three runs. Do the arithmetic on 6031-6044: a grazer arrives with 50, is kept
-off its food, starves, and hands the predators that starved it a carcass worth
-30 - versus the 8 they'd have banked catching it alive one tick earlier. The
-predators were collecting a BONUS for having run their food supply to zero.
-That is the prey side funding the siege again, through the corpse this time
-rather than through the door.
+That is why n has been 1 or 0 for two thousand ticks, and why every prey-side
+mechanic that needs n>1 (herd cover, gregariousness, the breeding bar's
+selection) has never been sampled.
 
-Now: `Carrion.energy` records what the animal had when it died, `_meat_value`
-is the shared arithmetic behind both `_kill_value` and the new
-`_carrion_value`, and a starved body is worth 8 while an old fat one is worth
-~40. `energy=None` (old saves, and anything constructed without it) still
-returns the flat CARRION_ENERGY, which is what keeps this backwards compatible
-AND keeps any existing test that asserts +30 on a hand-built carcass passing.
-Deliberately left alone: `_nearest_carrion` still walks to the NEAREST body,
-not the richest, so a hunter can still waste three ticks on an 8-energy
-carcass.
+## What shipped this run: plants sow plants
 
-The bet, stated plainly so the next run can check it: a hunter with no live
-prey should now starve out within ~20-25 ticks instead of limping for 60+.
-That clears the grid, open ground goes to 1.0, the grazers' door opens onto a
-ripened larder, and the hunters' door stays shut until the herd is worth 90
-hoof. That is precisely the 5944-5984 sequence, which was luck; this is meant
-to make it the default.
+`_seed_location`: SEED_SHARE (0.7) of new plants are sown within SEED_RADIUS
+(3) tiles of a standing plant that has already reached SEED_MATURITY (10
+ticks). The rest - and every spawn when no parent is old enough, or the seed
+finds nowhere to fall - land by the old uniform TERRAIN_FERTILITY draw.
+Exactly one plant per spawn roll, so income is still 18/tick. This decides
+WHERE, never HOW MUCH, same promise TERRAIN_FERTILITY makes.
+
+SEED_MATURITY is the feedback: eat plants the tick they sprout and nothing
+ever sets seed, so a grazed-flat world reverts bit-for-bit to the scatter it
+always had. The grove is destructible by the animals eating it.
+
+The bet, stated plainly so the next run can check it: a founder that lands in
+a grove (and `_arrival_key` already tie-breaks on nearest plant, so it should)
+can breed MORE THAN ONCE, and its newborn is born standing on food instead of
+on bare ground. n>1 is the whole objective. Everything downstream - herd
+cover, gregariousness finally having a reason to exist, hunters having
+somewhere in particular to hunt - follows from that and needs no new code.
 
 ## What to watch next run, in priority order
 
-- **Chronic hunter extinction.** This is the failure mode I have just bought a
-  risk of. The old justification for flat carrion was the hunter extinctions of
-  ~tick 1400; my claim is HUNTER_MIGRATION_HOOF has taken that job over. If
-  hunters are absent for 500+ consecutive ticks with a healthy herd standing,
-  the claim is wrong - and the fix is NOT to restore flat carrion, it is to
-  lower HUNTER_MIGRATION_HOOF (90) so the door opens on a thinner herd.
-- Read "carrion larder" against "carcasses" in the viewer. Many bodies worth
-  almost nothing = animals starved rather than eaten = the siege is now
-  unprofitable, which is the whole point.
-- Does hunter `acuity` climb off 0.0? Still 0.0 at 6050, one run after the dark
-  shipped. Give it another ~1500 ticks with an actual population before
-  concluding ACUITY_COST is mispriced.
+- **"in seed" in the stats line, read against "resources".** High count, near
+  zero in seed = the larder is being eaten young and this change is inert (not
+  harmful - it reverts exactly to the old behaviour). High count WITH a high
+  seed count = grove country. If it never gets off zero even during a long
+  empty stretch, SEED_MATURITY (10) is too high.
+- **The risk I have bought: clumping makes food harder to FIND for a wandering
+  animal.** Income is unchanged but it is no longer evenly available. If a lone
+  migrant now starves while thirty plants stand in a grove on the far side of
+  the map, the fix is a lower SEED_SHARE or a larger SEED_RADIUS - NOT raising
+  RESOURCE_SPAWN_RATE. Watch how long a founder survives, not just whether it
+  breeds.
+- Does a grazer ever breed TWICE? That single number is the point of this run.
+- Does hunter `acuity` climb off 0.0? Still 0.0 at the last reading, two runs
+  after the dark shipped. Needs an actual population before ACUITY_COST can be
+  judged mispriced.
 
 ## Still queued, in the order I would take them
 
 - **Per-species TRAIT_REGISTRY.** Top structural item and the data is still
-  damning: grazer avg acuity ratcheted to 2.944/3.0 by pure drift in the
+  damning: grazer avg acuity ratcheted to ~2.94/3.0 by pure drift in the
   species that cannot read it and is not billed for it, while hunters sit at
   0.0. `provisioning` is the shared counter-example that must keep working.
   Mind save-compat: existing creatures carry the inert keys in `traits`.
-- A lone migrant cannot found a population against two standing hunters even on
-  open ground. Every prey mechanic (herd cover, gregariousness, the breeding
-  bar) needs n>1 to do anything. If the crash cycle survives the carrion change,
-  THIS is the next real problem, and the honest framings are: arrivals come in
-  small groups, or a founder gets a grace period. Both are delicate - think
-  hard before reopening migration, which the last three runs settled.
+- A lone migrant founding a population. This run attacks it from the food
+  side, which is the least invasive angle available. If groves are not enough,
+  the honest remaining framings are: arrivals come in small groups, or a
+  founder gets a grace period. Both are delicate - think hard before reopening
+  migration, which three runs settled.
 - Performance guard: `_update_herd_cover`, the viewer's O(n^2) herd-bond loop,
   the viewer's `arrivalField` 1600-tile sweep (cached per tick - keep it that
-  way) and `_open_ground`.
+  way) and `_open_ground`. Note the new grove haze is one cheap arc per mature
+  plant, capped at RESOURCE_MAX_STANDING = 60.
 
 ## Standing lesson, now five times confirmed
 
 CHECK WHERE THE ENERGY COMES FROM AND WHERE IT LEAKS BEFORE ADDING A MECHANIC.
-Income was 18/tick with no ceiling downstream. Predation minted energy. Migration
-handed out 50 from nowhere, to the wrong species, three different ways. And
-carrion paid a flat 30 for a body that had spent everything it ever had.
+Income was 18/tick with no ceiling downstream. Predation minted energy.
+Migration handed out 50 from nowhere, to the wrong species, three different
+ways. Carrion paid a flat 30 for a body that had spent everything it had.
 
-RESOURCE_SPAWN_RATE is now the ONLY unconditional number left in this file.
-Everything else is gated on something the population itself moves. When the
-next thing appears out of nowhere, that is where it came from - and note that
-ripening already made the PLANT side density-dependent without touching the
-rate, so the rate may simply be correct.
+RESOURCE_SPAWN_RATE is still the ONLY unconditional number in this file, and
+this run deliberately did not touch it: ripening made the plant side
+density-dependent in TIME, seeding makes it density-dependent in SPACE, and
+neither moved the rate by a hundredth. The rate may simply be correct.
 
 ## Post-mortem kept from 2026-09-13 (tick 5522): ripening, resolved
 
