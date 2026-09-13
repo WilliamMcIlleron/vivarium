@@ -45,6 +45,26 @@ never lets one reach seed, and lives on exactly the flat scatter this world
 always had, while ground nobody came for compounds into a patch dense enough
 and rich enough that a newborn can live off the tile it was born on.
 
+And as of this run the animals can finally tell one plant from another. Food
+was chosen by distance alone, so a grazer standing between a sprout worth
+thirty and a fully ripe plant worth seventy-five four tiles further on took the
+sprout every single time - which means ripening and seeding, the two mechanics
+this world's whole recovery rests on, were invisible to the only thing in it
+that eats. A grazer now takes the best NET plant in reach (see _forage_net and
+_forage_target): what it will be worth on arrival, less the upkeep of the body
+that has to walk there, measured in the same ticks-of-your-own-metabolism unit
+a newborn's runway is measured in. Nothing is created - the plants were always
+that valuable and always standing exactly where they stand - and a world being
+eaten flat, where every plant in reach is a thirty-point sprout, degenerates
+straight back into taking the closest one. It pays only on ground that has been
+left alone, it makes a grove legible from across a grazer's whole horizon, and
+it puts one more quiet price on an expensive body, since an animal burning
+eight a tick writes off four times as much of a distant meal as one burning
+two. The hunters are deliberately left blind to it, exactly as they are left
+walking to the nearest carcass rather than the richest: a predator that cannot
+tell a fat grazer from a starving one spends its legs on animals worth eight,
+and that is one more way a siege costs the besiegers.
+
 Fleeing, meanwhile, is not a reflex, and as of this run it is not measured in
 tiles either. A grazer judges a predator by how long it would take to arrive:
 it demands a few ticks of clearance (FLIGHT_WARNING_TICKS, cut by the `nerve`
@@ -797,7 +817,7 @@ FERTILITY_ATTEMPTS = 12   # rejection-sampling tries before a resource lands any
 # midnight is worth about as much as standing in the trees, and the two stack,
 # because they are the same kind of thing. It enters the world in exactly two
 # places - a hunter's search for live prey (see _nearest_creature) and a
-# grazer's search for a plant (see _nearest_resource) - and it is subtracted
+# grazer's search for a plant (see _forage_target) - and it is subtracted
 # from both, which is the whole design. A concealment that only hid the prey
 # would be a flat half-time buff on a timer; one that hides the larder too is a
 # tradeoff with a clock on it, and it is the same tradeoff the map already
@@ -1106,8 +1126,10 @@ class World:
         # sprinter can matter more than a slow scavenger two tiles away - and
         # they flee toward the best cover they can reach rather than in a
         # straight line; otherwise they either drift toward company
-        # (gregariousness) or head for the nearest resource, falling back to a
-        # random walk if nothing relevant is in sense range.
+        # (gregariousness) or head for the plant that is worth the most once
+        # the walk to it has been paid for (see _forage_net) - which is the
+        # nearest one whenever every plant in reach is the same fresh sprout -
+        # falling back to a random walk if nothing relevant is in sense range.
         # Grazers reusing sense_range for threat detection means the same
         # mutating gene trades off "finds food better" against "spots
         # predators better" - no separate dial. What it no longer trades off
@@ -1143,7 +1165,7 @@ class World:
                 if threat is not None:
                     _move_away(creature, threat, self.terrain)
                 else:
-                    target = _nearest_resource(creature, self.resources, dark)
+                    target = _forage_target(creature, self.resources, dark)
                     companion = _herd_target(creature, grazers, target)
                     if companion is not None:
                         _move_toward(creature, companion)
@@ -1781,7 +1803,44 @@ def _herd_target(
     return companion if random.random() < gregariousness / hi else None
 
 
-def _nearest_resource(
+def _travel_ticks(creature: Creature, x: int, y: int) -> int:
+    """How many ticks this creature needs before it is standing on (x, y).
+
+    Movement here clamps each axis independently (see _move_toward), so a trip
+    is the Chebyshev distance divided by speed and a diagonal costs exactly
+    what a straight line of the same box-distance does. Zero for the tile the
+    animal is already on, which is why a plant underfoot is worth every point
+    it carries.
+    """
+    distance = max(abs(x - creature.x), abs(y - creature.y))
+    return math.ceil(distance / max(1, creature.speed))
+
+
+def _forage_net(creature: Creature, resource: Resource) -> int:
+    """What this plant is actually worth to THIS animal: what it will be worth
+    when the animal gets there (see _resource_energy), less the upkeep of the
+    body that has to do the walking (see _upkeep and _travel_ticks).
+
+    The unit is the one this world already prices a childhood in - ticks of
+    your own metabolism - and the arithmetic creates nothing. The plant is
+    exactly as valuable as it always was and standing exactly where it always
+    stood; all this does is let the thing eating it tell the difference.
+
+    Two consequences fall out of that, neither of which needed new code. A
+    grove reads as a grove from anywhere in a grazer's horizon, because ripe
+    ground is worth crossing ordinary ground to reach - which is what makes
+    last run's seeding visible to the animals it was built for. And an
+    expensive body is pickier about how far it will go for a meal, since a
+    grazer burning eight a tick writes off four times as much of a distant
+    plant as one burning two: one more quiet price on metabolism, charged in
+    what an animal passes up rather than in energy taken off it.
+    """
+    return _resource_energy(resource) - _upkeep(creature) * _travel_ticks(
+        creature, resource.x, resource.y
+    )
+
+
+def _forage_target(
     creature: Creature, resources: list[Resource], dark: float = 0.0
 ) -> Resource | None:
     """The plant this creature can see and will walk to. `dark` is what the
@@ -1791,6 +1850,15 @@ def _nearest_resource(
     dinner - the cost of the refuge, charged in missed meals rather than in
     energy, exactly as the canopy's is. Defaults to broad daylight, so anything
     calling this without a clock behaves as this world always did.
+
+    WHICH of the plants in reach it takes is the thing that changed. This was
+    `_nearest_resource` and it ranked food by distance alone, so a grazer stood
+    between a thirty-point sprout and a fully ripe seventy-five four tiles
+    further on and took the sprout - which meant the ripening larder and the
+    groves growing out of it were invisible to the only thing in this world
+    that eats. The best net plant wins now (see _forage_net) and distance is
+    only the tie-break, so a grazed-flat world of identical fresh sprouts
+    degenerates precisely back into taking the closest one.
     """
     reach = max(0.0, creature.sense_range - dark)
     in_range = [
@@ -1800,7 +1868,13 @@ def _nearest_resource(
     ]
     if not in_range:
         return None
-    return min(in_range, key=lambda r: abs(r.x - creature.x) + abs(r.y - creature.y))
+    return max(
+        in_range,
+        key=lambda r: (
+            _forage_net(creature, r),
+            -(abs(r.x - creature.x) + abs(r.y - creature.y)),
+        ),
+    )
 
 
 def _edible(carcass: Carrion) -> bool:
@@ -1862,7 +1936,7 @@ def _nearest_creature(
     # ACUITY_COST) to see through it. The dark is the only one of the five that
     # no grazer has to do anything to earn and none of them can be denied, and
     # the only one that costs the prey something on its own account, because
-    # the same darkness hides the plants (see _nearest_resource).
+    # the same darkness hides the plants (see _forage_target).
     # Grazers scanning for hunter threats, and grazers looking for each other,
     # are unaffected (camouflage_aware defaults to False), so none of this
     # ever helps the side it wasn't meant for - a hunter in the forest is as

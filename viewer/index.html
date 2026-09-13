@@ -181,6 +181,7 @@
     <span class="swatch"><span class="ring" style="border-color:var(--nightfall);border-style:dotted"></span>nightfall (the cold indigo ring, on both species, appearing only once the light goes: what this animal can actually FIND in the present hour. The day/night wash is no longer decoration - darkness takes up to 1.5 tiles off a hunter's search for live prey, exactly the way the canopy does, and off a grazer's search for a plant, so the safest hours to be prey are also the hungriest ones. A grazer still sees an approaching hunter perfectly well at midnight, a carcass still takes no special eye to find, and the plants nobody finds in the dark stand and ripen until morning. Acuity is a predator's night vision: it is the only thing that buys the dark back.)</span>
     <span class="swatch"><span class="dot" style="background:var(--resource)"></span>resource (grows where light reaches the ground, so it clusters in the open - and fattens the longer nobody eats it: small and dark is freshly sprouted and worth what a resource here has always been worth, big and pale is a plant that has stood a hundred ticks, ringed once it can grow no further)</span>
     <span class="swatch"><span class="dot" style="background:rgba(232,192,125,0.22);width:12px;height:12px"></span>grove (the soft amber haze: ground a standing plant can actually sow. A resource left alone for ten ticks sows the next one within three tiles of itself, so food grows in patches instead of an even sprinkle over sixteen hundred tiles - and a population eating every plant the tick it sprouts never lets one reach seed at all, and lives on the flat scatter this world always had. Overlapping haze is a grove, dense and ripe enough for a newborn to feed on the tile it was born on; a bare diamond with no haze is a plant that will be eaten before it ever reproduces.)</span>
+    <span class="swatch"><span class="bar" style="background:var(--resource)"></span>worth the walk (the dashed amber thread running from a grazer to the ringed plant it has actually chosen. Food used to be taken by distance alone, so the ripening larder and the groves growing out of it were invisible to the only thing in this world that eats them; a grazer now takes the plant worth the most once the walk is paid for - its value on arrival, minus the upkeep of the body going to get it. A short dim thread to the nearest diamond is a flat world of identical sprouts where the choice means nothing and the behaviour is exactly the old one; a long bright thread reaching past close food into a patch of fat pale plants is an animal crossing its whole horizon for a meal worth three of the ones at its feet - and an expensive body, burning more per tick, writes off that distance far harder than a cheap one does.)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--carrion)"></span>carcass (a grazer's body - the only carrion a hunter can eat; fades as it rots, and as of this run its SIZE and its orange quarry rim are what a scavenger would actually bank for it. A carcass used to be a flat 30 whatever condition the animal fell in, so a grazer the hunters had starved was worth four times more to them dead than alive; a body is worth the body now, which makes a starveling's corpse a bare speck and an old animal that died fat a genuine windfall.)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--carrion-inedible);border-style:dotted"></span>hunter remains (crossed out: predators no longer live off their own dead, so this is scenery)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--migrant);border-style:dashed"></span>migrant (just arrived, carries remembered genes)</span>
@@ -277,6 +278,43 @@ function resourceEnergy(r) {
     RESOURCE_MAX_ENERGY,
     RESOURCE_ENERGY + Math.floor((r.age || 0) / RESOURCE_RIPEN_TICKS)
   );
+}
+
+// Mirrors of _travel_ticks(), _forage_net() and _forage_target() in
+// rules/ecosystem.py. Food used to be picked by distance alone, which meant
+// the two mechanics this world's recovery actually rests on - plants ripening
+// where nobody came for them, and ripe plants seeding groves around themselves
+// - were invisible to the only thing in the world that eats. A grazer now
+// takes the plant with the best NET worth in reach: what it will be worth on
+// arrival, minus the upkeep of the body that has to walk there, in the same
+// ticks-of-your-own-metabolism unit the birth runway uses. forageChoice also
+// reports the PREMIUM - how much more the chosen plant carries than the nearest
+// one it could have taken instead - which is zero in a flat world of identical
+// sprouts, i.e. exactly where the new rule and the old rule agree.
+function travelTicks(c, x, y) {
+  const d = Math.max(Math.abs(x - (c.x || 0)), Math.abs(y - (c.y || 0)));
+  return Math.ceil(d / Math.max(1, c.speed || 1));
+}
+
+function forageNet(c, r) {
+  return resourceEnergy(r) - upkeep(c) * travelTicks(c, r.x, r.y);
+}
+
+function forageChoice(c, resources, dark) {
+  const reach = Math.max(0, (c.sense_range || 0) - dark);
+  let best = null, bestNet = -Infinity, bestMan = Infinity;
+  let near = null, nearMan = Infinity;
+  for (const r of resources) {
+    if (Math.abs(r.x - c.x) > reach || Math.abs(r.y - c.y) > reach) continue;
+    const man = Math.abs(r.x - c.x) + Math.abs(r.y - c.y);
+    const net = forageNet(c, r);
+    if (net > bestNet || (net === bestNet && man < bestMan)) {
+      best = r; bestNet = net; bestMan = man;
+    }
+    if (man < nearMan) { near = r; nearMan = man; }
+  }
+  if (!best) return null;
+  return { plant: best, premium: resourceEnergy(best) - resourceEnergy(near) };
 }
 
 // Mirror of _kill_value() in rules/ecosystem.py: what a hunter actually banks
@@ -1055,6 +1093,44 @@ function draw(now) {
     }
   }
 
+  // worth the walk: the plant each grazer has actually chosen, and the thread
+  // it is walking down to get there. Food used to be taken by distance alone,
+  // so ripening and seeding - the whole of this world's recovery machinery -
+  // were invisible to the animals they were built for; a grazer now takes the
+  // best NET plant in reach, its value on arrival less the upkeep of the body
+  // going to fetch it (see _forage_net in rules/ecosystem.py). The thread is
+  // dim and short when it points at the nearest diamond, which is what a
+  // grazed-flat world of identical sprouts looks like and is bit-for-bit the
+  // old behaviour; it brightens and lengthens as the animal walks past close
+  // food for something fatter, so a bright thread reaching across the map into
+  // a grove is this change doing the thing it exists to do.
+  for (const c of creatures) {
+    if (c.species === 'hunter') continue;
+    const choice = forageChoice(c, world.resources || [], dark);
+    if (!choice) continue;
+    const gain = Math.max(0, Math.min(1,
+      choice.premium / (RESOURCE_MAX_ENERGY - RESOURCE_ENERGY)));
+    const cx = c.drawX * cell + cell / 2;
+    const cy = c.drawY * cell + cell / 2;
+    const tx = choice.plant.x * cell + cell / 2;
+    const ty = choice.plant.y * cell + cell / 2;
+    ctx.globalAlpha = c.alpha * (0.10 + 0.45 * gain);
+    ctx.strokeStyle = '#e8c07d';
+    ctx.lineWidth = Math.max(0.5, cell * (0.012 + 0.032 * gain));
+    ctx.setLineDash([cell * 0.18, cell * 0.22]);
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(tx, ty);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = c.alpha * (0.22 + 0.50 * gain);
+    ctx.lineWidth = Math.max(0.6, cell * 0.028);
+    ctx.beginPath();
+    ctx.arc(tx, ty, cell * 0.44, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
   // flight distance: the ground a grazer insists on keeping between itself
   // and ONE PARTICULAR hunter (see _panic_radius in rules/ecosystem.py). It
   // is no longer a property of the prey alone and no longer a copy of the
@@ -1413,6 +1489,21 @@ function draw(now) {
   const inSeed = (world.resources || [])
     .filter(r => (r.age || 0) >= SEED_MATURITY).length;
 
+  // What the grazers' choosiness is worth this tick: for each of them, how much
+  // more energy the plant it has chosen carries than the nearest plant it could
+  // have taken instead (see _forage_net in rules/ecosystem.py). Zero means every
+  // plant in reach is the same thirty-point sprout and the new rule has
+  // degenerated exactly back into "go to the closest" - which is precisely what
+  // a grazed-flat world should look like. A big number is ripe ground standing
+  // and animals crossing their own horizon to reach it, and it should read
+  // against "in seed": groves are where the premium comes from.
+  const walkWorth = creatures
+    .filter(c => c.species !== 'hunter')
+    .reduce((sum, c) => {
+      const choice = forageChoice(c, world.resources || [], dark);
+      return sum + (choice ? choice.premium : 0);
+    }, 0);
+
   // The predators' larder: what the whole grazer population is currently worth
   // if it were caught (see _kill_value in rules/ecosystem.py). Read it against
   // "larder", the energy standing on the ground, because they are now the same
@@ -1498,6 +1589,7 @@ function draw(now) {
     `<span>resources <b>${(world.resources || []).length}</b></span>` +
     `<span>larder <b>${larder}</b></span>` +
     `<span>in seed <b>${inSeed}</b></span>` +
+    `<span>worth the walk <b>${walkWorth}</b></span>` +
     `<span>prey on the hoof <b>${onTheHoof}</b></span>` +
     `<span>safe ground <b>${(arrival.safeFraction * 100).toFixed(0)}%</b></span>` +
     `<span>predator draw <b>${predatorDraw > 0
