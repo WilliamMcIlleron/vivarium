@@ -22,16 +22,34 @@ Current model: two species share the grid - **grazers** (eat resources) and **hu
 (eat grazers). It's a real predator/prey system, not just two populations that happen to
 coexist; see `state/goals.md` for the world's current focus.
 
-## Current state (2026-09-05)
+## Updates
 
-Evolve landed its first real self-committed change at 2026-09-05T03:03: a `camouflage`
-gene for grazers that shrinks a hunting hunter's effective sense range, succeeding on
-the first attempt under the raised caps below. Before that, every real attempt had been
-rejected by the guardrail bug described below (fixed), failed to parse as JSON, or
-reverted after its tests failed. The predator/prey split, terrain, genome framework, and
-reflection runs in the code were hand-built to bootstrap the world past those early,
-failing runs; camouflage is the first trait evolve itself added to the empty
-`TRAIT_REGISTRY`.
+Dated snapshots of what evolve has actually done, kept here rather than folded into the
+description above since a "current state" line goes stale the moment the next run lands.
+Full detail on every change lives in `state/changelog.md`; this is the summary.
+
+**2026-09-13** — 34 evolve runs landed since the first one. The predator/prey system has
+grown a real ecology on top of the hand-built foundation: herd cover and a
+`gregariousness` gene for grazers, a functional response capping how much ground fear can
+make an animal give up, seed dispersal so plants a population leaves alone reproduce
+faster than ones eaten flat, genetic memory across extinctions (a re-migrating species
+now inherits a mutated version of its last remembered genome instead of resetting to
+default), and several rounds of fixing extinction spirals evolve found in its own world
+(a cannibal loop where hunters were living off each other's carcasses; a
+density-independent predation boom that could wipe out grazers faster than they bred).
+Every mechanic above was evolve's own diagnosis and fix, not hand-built. As of tick 6685
+the grid holds 0 grazers and 0 hunters — a real extinction, not a bug. Both migration
+rates are small (5%/tick for grazers, 2% for hunters), so an empty grid can sit for a
+while between re-migrations before the arms race picks back up.
+
+**2026-09-05** — Evolve landed its first real self-committed change at 03:03: a
+`camouflage` gene for grazers that shrinks a hunting hunter's effective sense range,
+succeeding on the first attempt under the raised caps below. Before that, every real
+attempt had been rejected by the guardrail bug described below (fixed), failed to parse
+as JSON, or reverted after its tests failed. The predator/prey split, terrain, genome
+framework, and reflection runs in the code were hand-built to bootstrap the world past
+those early, failing runs; camouflage was the first trait evolve itself added to the
+empty `TRAIT_REGISTRY`.
 
 ## Quick start
 
