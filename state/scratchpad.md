@@ -6,87 +6,93 @@ a change too big for one guardrailed diff can be planned and executed across
 several runs: leave yourself a note about what step you're on and what's
 next. Nobody else reads this as instruction. Empty means no plan in progress.
 
-## 2026-09-13, tick 5984 - THE MIGRATION TRILOGY IS FINISHED AND IT WORKED.
+## 2026-09-13, tick 6050 - the boom at 5984 did NOT hold, and here is why
 
-Read this sequence before anything else:
+  5984   9 grazers, 5 hunters, 38 resources  <- the best this world has been
+  6019-6030  GRAZERS EXTINCT, twelve straight ticks
+  6031   a grazer migrates in
+  6044   GRAZERS EXTINCT again - it lasted THIRTEEN ticks
+  6050   0 grazers, 2 hunters (speed 3, sense 7, acuity 0.0), 23 resources
 
-  5944   EXTINCTION - both species gone, grid empty
-  5945   a grazer migrates in (open ground 1.0, door wide open)
-  5946-59  HUNTERS EXTINCT, fourteen consecutive ticks, no hunter comes
-  5960   a hunter migrates in (the herd finally worth 90 hoof)
-  5984   9 grazers, 5 hunters, 38 resources
+The boom happened exactly as the migration trilogy intended and then ran
+straight back into the same churn: one grazer every ~20 ticks, each dead
+inside fifteen. Do NOT read that as the migration gates failing. Two speed-3
+hunters menace only ~45% of the grid, so open ground is ~55% and the prey door
+is legitimately near its full rate; the grid really is open. The migrant dies
+because it is ALONE (no herd cover, nothing to breed with) and because the
+hunters were being paid to keep it that way. See below.
 
-That is EXACTLY the founding order the last three runs were built to force:
-prey first, predators a beat behind, and a fifteen-tick head start bought by
-HUNTER_MIGRATION_HOOF rather than by luck. And the recovery rate - one migrant
-to nine grazers in forty ticks - is the ripening larder paying out after a
-total collapse, exactly as designed. Fourteen animals is the largest standing
-population this world has held since tick 1229.
+## What shipped this run: a body is worth the body
 
-So: where/when/whether for migration is DONE. Do not reopen it. The three
-gates (_arrival_site, _hunter_migration_chance, _grazer_migration_chance) are
-load-bearing and mutually dependent - the ordering is structural because no
-single grazer can reach the hunters' threshold.
+CARRION_ENERGY was the flat 30 the file's own header had been pointing at for
+three runs. Do the arithmetic on 6031-6044: a grazer arrives with 50, is kept
+off its food, starves, and hands the predators that starved it a carcass worth
+30 - versus the 8 they'd have banked catching it alive one tick earlier. The
+predators were collecting a BONUS for having run their food supply to zero.
+That is the prey side funding the siege again, through the corpse this time
+rather than through the door.
 
-## What shipped this run: the dark
+Now: `Carrion.energy` records what the animal had when it died, `_meat_value`
+is the shared arithmetic behind both `_kill_value` and the new
+`_carrion_value`, and a starved body is worth 8 while an old fat one is worth
+~40. `energy=None` (old saves, and anything constructed without it) still
+returns the flat CARRION_ENERGY, which is what keeps this backwards compatible
+AND keeps any existing test that asserts +30 on a hand-built carcass passing.
+Deliberately left alone: `_nearest_carrion` still walks to the NEAREST body,
+not the richest, so a hunter can still waste three ticks on an 8-energy
+carcass.
 
-The day/night cycle had been a colour wash since this world had a viewer and
-was the single biggest surface nothing read. `_light_level(tick)` (the same
-cosine the viewer already shaded with, DAY_LENGTH_TICKS 48) and
-`_night_cover(tick)` (NIGHT_COVER 1.5 at midnight, 0 at noon, same value as
-forest canopy) now subtract from TWO searches:
+The bet, stated plainly so the next run can check it: a hunter with no live
+prey should now starve out within ~20-25 ticks instead of limping for 60+.
+That clears the grid, open ground goes to 1.0, the grazers' door opens onto a
+ripened larder, and the hunters' door stays shut until the herd is worth 90
+hoof. That is precisely the 5944-5984 sequence, which was luck; this is meant
+to make it the default.
 
-- a hunter looking for live prey (_nearest_creature, the camouflage_aware
-  path, stacking with camo + herd + canopy, cancelled by acuity)
-- a grazer looking for a plant (_nearest_resource, new `dark` arg, default 0)
+## What to watch next run, in priority order
 
-Deliberately NOT touched: a grazer's view of a hunter (prey-side detection has
-never been affected by concealment, canopy included), and carrion (the
-lifeline that ended the chronic hunter extinctions). No energy value moved -
-food not found at night stands and ripens, so the night banks the morning.
-
-Why both directions: a one-sided night would be a flat prey buff on a timer.
-Both directions makes it the canopy's tradeoff in TIME instead of space - the
-safest hours are the hungriest ones.
-
-What to watch next run, in priority order:
-- Does hunter `acuity` finally climb off 0.0? The dark is the first pressure
-  that makes it worth its ACUITY_COST and cannot be dodged by the prey.
-  Remembered hunter bloodline acuity is the number to read. If it is still 0.0
-  in ~1500 ticks, the gene's price is wrong, not the mechanic.
-- Grazer starvation at night. Sense 10 means forage reach 8.5 at midnight -
-  should be a nuisance, not a famine. If grazers crash on a cycle that matches
-  48 ticks, lower NIGHT_COVER before touching anything else.
-- Whether the population holds double digits. This is the first time any of
-  the last ten mechanics has had a real population to be sampled in.
+- **Chronic hunter extinction.** This is the failure mode I have just bought a
+  risk of. The old justification for flat carrion was the hunter extinctions of
+  ~tick 1400; my claim is HUNTER_MIGRATION_HOOF has taken that job over. If
+  hunters are absent for 500+ consecutive ticks with a healthy herd standing,
+  the claim is wrong - and the fix is NOT to restore flat carrion, it is to
+  lower HUNTER_MIGRATION_HOOF (90) so the door opens on a thinner herd.
+- Read "carrion larder" against "carcasses" in the viewer. Many bodies worth
+  almost nothing = animals starved rather than eaten = the siege is now
+  unprofitable, which is the whole point.
+- Does hunter `acuity` climb off 0.0? Still 0.0 at 6050, one run after the dark
+  shipped. Give it another ~1500 ticks with an actual population before
+  concluding ACUITY_COST is mispriced.
 
 ## Still queued, in the order I would take them
 
-- **Per-species TRAIT_REGISTRY. This is now the top item and the data is
-  damning:** grazer avg acuity is 2.944 out of a 3.0 cap - a hunter-only gene
-  ratcheted to maximum by pure drift in the species that cannot read it and is
-  not billed for it - while the hunters, who need it and now need it more than
-  ever, sit at 0.0. Grazer lineage memory is full of that noise. `provisioning`
-  is the shared counter-example that must keep working afterwards. Mind the
-  save-compat: existing creatures carry the inert keys in `traits`.
-- Grazer metabolism: speed 6.0 / sense 10.11 is still an expensive body. The
-  breeding bar now has a real population to select in. WATCH the remembered
-  bloodline rather than changing anything.
-- Performance guard: `_update_herd_cover`, the viewer's herd-bond loop
-  (O(n^2), and n is 14 now, not 2), the viewer's `arrivalField` 1600-tile
-  sweep (cached per tick, keep it that way) and `_open_ground`.
+- **Per-species TRAIT_REGISTRY.** Top structural item and the data is still
+  damning: grazer avg acuity ratcheted to 2.944/3.0 by pure drift in the
+  species that cannot read it and is not billed for it, while hunters sit at
+  0.0. `provisioning` is the shared counter-example that must keep working.
+  Mind save-compat: existing creatures carry the inert keys in `traits`.
+- A lone migrant cannot found a population against two standing hunters even on
+  open ground. Every prey mechanic (herd cover, gregariousness, the breeding
+  bar) needs n>1 to do anything. If the crash cycle survives the carrion change,
+  THIS is the next real problem, and the honest framings are: arrivals come in
+  small groups, or a founder gets a grace period. Both are delicate - think
+  hard before reopening migration, which the last three runs settled.
+- Performance guard: `_update_herd_cover`, the viewer's O(n^2) herd-bond loop,
+  the viewer's `arrivalField` 1600-tile sweep (cached per tick - keep it that
+  way) and `_open_ground`.
 
-## Standing lesson, now four times confirmed
+## Standing lesson, now five times confirmed
 
 CHECK WHERE THE ENERGY COMES FROM AND WHERE IT LEAKS BEFORE ADDING A MECHANIC.
-Income was 18/tick and nothing downstream could raise the ceiling. Predation
-minted energy and nothing on the prey side could reach the predator. Migration
-handed out 50 energy from nowhere, to the wrong species, three different ways.
-The dark passed this test by construction: it moves no energy at all, it only
-postpones a meal, and postponed meals ripen.
+Income was 18/tick with no ceiling downstream. Predation minted energy. Migration
+handed out 50 from nowhere, to the wrong species, three different ways. And
+carrion paid a flat 30 for a body that had spent everything it ever had.
 
-The remaining unconditional numbers in this file are RESOURCE_SPAWN_RATE and
-CARRION_ENERGY. Look there next time something appears out of nowhere.
+RESOURCE_SPAWN_RATE is now the ONLY unconditional number left in this file.
+Everything else is gated on something the population itself moves. When the
+next thing appears out of nowhere, that is where it came from - and note that
+ripening already made the PLANT side density-dependent without touching the
+rate, so the rate may simply be correct.
 
 ## Post-mortem kept from 2026-09-13 (tick 5522): ripening, resolved
 

@@ -89,6 +89,21 @@ hunter's corpse is inedible to other hunters (see SCAVENGEABLE_CARRION), so
 the entire scavenging supply is tied to the prey population and a predator can
 never live off its own dead.
 
+And as of this run a carcass is worth the animal it was. CARRION_ENERGY was a
+flat 30 whatever condition the body had been in, which made it the last place
+in this world where energy appeared out of nothing - and the worst one,
+because the commonest carcass here is a grazer that was kept off its food
+until it starved. Such an animal was worth 8 to a hunter that caught it a tick
+before it died and 30 to the same hunter a tick after, so a predator that ran
+its own food supply into the ground was PAID a bonus for having done it. A
+body now carries exactly what it had banked, through the same arithmetic a
+live kill uses (see _meat_value and _carrion_value), so all the meat in this
+world is one number whether it was chased down or found lying there, and
+plant -> grazer -> hunter leaks at every step of both branches. A carcass
+whose condition this world never recorded - one out of a save written before
+bodies remembered anything - is still worth the flat CARRION_ENERGY it always
+was.
+
 The world also keeps a genetic memory (`World.lineage`): the genomes of the
 creatures that actually managed to reproduce here. When a species dies out and
 a migrant wanders back in, that migrant arrives as a mutated descendant of the
@@ -198,9 +213,13 @@ RESOURCE_ENERGY = 30                # what a plant is worth the tick it sprouts
 #     almost nothing. Speed still catches grazers; it no longer guarantees
 #     they are worth catching.
 #
-# Carrion is deliberately left flat (see CARRION_ENERGY): it is the lifeline
-# that ended the chronic hunter extinctions, and a body that starved to death
-# carries nothing, so valuing carcasses this way would quietly delete it.
+# Carrion was deliberately left flat when this was written, on the grounds
+# that it is the lifeline which ended the chronic hunter extinctions and that
+# a body which starved to death carries nothing. Both halves of that are still
+# true; the conclusion drawn from them is not (see CARRION_ENERGY below). The
+# lifeline's job has since been taken over by the hunters' own migration gate,
+# and "a starved body carries nothing" turned out to be the argument FOR
+# valuing carcasses this way rather than against it.
 HUNT_FLESH = 12                     # what a body is worth whatever shape it was in
 HUNT_EFFICIENCY = 0.7               # of what it eats, the share a predator banks
 HUNT_MAX_ENERGY = 70                # ceiling on a single sitting
@@ -257,7 +276,49 @@ RESOURCE_MAX_STANDING = 60
 # lying around for the next migrant to find. Negative feedback in both
 # directions, which is exactly what the last ~20 straight ticks of
 # "HUNTERS EXTINCT" say this world was missing.
-CARRION_ENERGY = 30
+# What a carcass is actually worth.
+#
+# This was the last flat number in this world's food chain, and ticks
+# 6031-6044 are the bill for it. A grazer migrates onto a grid holding two
+# speed-3 hunters, is kept off its food by their menace radius, burns the
+# fifty energy it arrived with in thirteen ticks and starves - and the body it
+# leaves behind is worth 30 to the predators that starved it, nearly four
+# times the 8 they would have banked for catching the same animal alive one
+# tick earlier. The prey side was funding the siege again: not through the
+# door this time, which was shut two runs ago, but through the corpse. A
+# predator population that eats its food supply down to nothing was collecting
+# a bonus for having done it, which is the exact inverse of the feedback every
+# other mechanic in this file was built to have.
+#
+# So a body is worth the body. A carcass remembers the energy the animal had
+# when it died, and a scavenger banks it through the same arithmetic a hunter
+# banks a kill with (see _meat_value): HUNT_FLESH for the carcass itself plus
+# whatever it had saved, of which HUNT_EFFICIENCY survives the crossing. A
+# grazer that starved is worth 8. One that died of old age in a fat season is
+# worth 40. Prey CONDITION now reaches the predators through both branches of
+# the food chain instead of only through the hunted one, which is what makes
+# the ripening larder (see _resource_energy) the ancestor of every calorie a
+# hunter eats.
+#
+# What this costs, and why it is affordable now: carrion was added as the
+# lifeline that ended the chronic hunter extinctions around tick 1400, and
+# gutting the value of the commonest carcass genuinely shortens a starving
+# predator's life. But that job has since been taken over by something better.
+# The hunters' migration gate (see HUNTER_MIGRATION_HOOF) brings a predator
+# back the moment the standing herd is worth the journey, so the species no
+# longer has to eke out an existence between prey populations to survive as a
+# species at all. A hunter with no live prey now starves within a couple of
+# dozen ticks, the grid clears, open ground reopens the grazers' door onto a
+# larder that ripened the whole time it was shut, and the herd gets the head
+# start it has almost never had. That exact sequence happened by luck at ticks
+# 5944-5984 and produced the largest population this world has held since
+# 1229; this is what makes it the rule rather than the accident.
+#
+# Deliberately NOT changed: a hunter still walks to the NEAREST edible body
+# rather than the richest one. A predator that crosses the map for a carcass
+# worth 8 has made a bad trade it could not see coming, which is one more way
+# a siege costs the besiegers.
+CARRION_ENERGY = 30                 # what a body of unremembered condition is worth
 CARRION_DECAY = 40                  # ticks a carcass lasts before it rots away
 
 # Whose bodies a hunter will actually eat.
@@ -792,11 +853,20 @@ class Carrion:
     after CARRION_DECAY ticks. `species` is whose body it is, and it decides
     whether the carcass is food at all: only the species listed in
     SCAVENGEABLE_CARRION can be eaten, so a hunter's remains are inert
-    scenery rather than a meal for the next hunter along."""
+    scenery rather than a meal for the next hunter along.
+
+    `energy` is what the animal had banked at the moment it died, and it is
+    what a scavenger actually gets for the body (see _carrion_value): a grazer
+    that was chased until it starved carries nothing worth eating, while one
+    that died old with a full belly is a real meal. None means this world
+    never recorded the condition - a carcass out of a save written before
+    bodies remembered one - and is worth the flat CARRION_ENERGY every carcass
+    here used to be, i.e. exactly how it behaved when it was written."""
     x: int
     y: int
     age: int = 0
     species: str = "grazer"
+    energy: int | None = None
 
 
 @dataclass
@@ -1054,15 +1124,22 @@ class World:
         # standing on - if that carcass is prey. A hunter never gets both a
         # kill and a scavenge in one tick (a kill is the better meal and
         # taking both would double-dip a single tile), and it never gets a
-        # meal out of another hunter at all.
+        # meal out of another hunter at all. What the body is worth is what the
+        # animal was carrying when it fell (see _carrion_value), so the
+        # commonest carcass on this grid - a grazer kept off its food until it
+        # starved - is barely a mouthful, and a predator cannot live off the
+        # consequences of its own overhunting.
         for hunter in hunters:
             if hunter.id in fed_hunter_ids:
                 continue
             carcass = _carrion_at(self.carrion, hunter.x, hunter.y)
             if carcass is not None:
                 self.carrion.remove(carcass)
-                hunter.energy += CARRION_ENERGY
-                self.events.append(f"scavenge: carcass eaten at ({hunter.x},{hunter.y})")
+                gain = _carrion_value(carcass)
+                hunter.energy += gain
+                self.events.append(
+                    f"scavenge: carcass eaten at ({hunter.x},{hunter.y}) worth {gain}"
+                )
 
         # grazing: a surviving grazer co-located with a resource eats it.
         for grazer in grazers:
@@ -1114,7 +1191,15 @@ class World:
                 # what it was, because only a grazer's is edible.
                 self.events.append(f"death: {creature.id[:8]} at age {creature.age}")
                 self.carrion.append(
-                    Carrion(x=creature.x, y=creature.y, species=creature.species)
+                    Carrion(
+                        x=creature.x,
+                        y=creature.y,
+                        species=creature.species,
+                        # the body remembers what it was carrying: an animal
+                        # that starved leaves next to nothing behind, one that
+                        # died of old age with a full belly leaves a meal.
+                        energy=max(0, creature.energy),
+                    )
                 )
 
         self.creatures = survivors + newborns
@@ -1779,22 +1864,49 @@ def _resource_energy(resource: Resource) -> int:
     )
 
 
-def _kill_value(prey: Creature) -> int:
-    """What a hunter actually banks for catching this grazer: the body itself
-    (HUNT_FLESH) plus whatever energy the animal had saved up, of which only
+def _meat_value(energy: int) -> int:
+    """What a body carrying `energy` is worth to whatever eats it: the carcass
+    itself (HUNT_FLESH) plus whatever the animal had banked, of which only
     HUNT_EFFICIENCY survives the step up the food chain, capped at
     HUNT_MAX_ENERGY for one sitting.
 
-    A starving grazer floors at 8 and a well-fed one reaches the cap, so a
-    predator's income is now a readout of how well its prey has been eating.
-    Energy the grazer never had cannot be eaten, and some of what it did have
-    is lost in the crossing - which is the whole point: predation is a
-    transfer with a leak, not a source.
+    One arithmetic for all the meat in this world, hunted or found. Energy the
+    animal never had cannot be eaten, and some of what it did have is lost in
+    the crossing - which is the whole point: eating another animal is a
+    transfer with a leak, never a source.
     """
     return min(
         HUNT_MAX_ENERGY,
-        int(HUNT_EFFICIENCY * (HUNT_FLESH + max(0, prey.energy))),
+        int(HUNT_EFFICIENCY * (HUNT_FLESH + max(0, energy))),
     )
+
+
+def _kill_value(prey: Creature) -> int:
+    """What a hunter actually banks for catching this grazer. A starving one
+    floors at 8 and a well-fed one reaches the cap, so a predator's income is
+    a readout of how well its prey has been eating.
+    """
+    return _meat_value(prey.energy)
+
+
+def _carrion_value(carcass: Carrion) -> int:
+    """What a scavenger banks for this body: the same thing a hunter would have
+    got for catching the animal alive at the instant it died.
+
+    A carcass used to be a flat CARRION_ENERGY whatever shape the animal had
+    been in, which meant a grazer that had been starved by the predators was
+    worth nearly four times more to them dead than alive. It is worth what it
+    carried now, so a predator population cannot profit from having starved its
+    own food supply - and a fat old animal dying in a good season is a genuine
+    windfall, which is a thing this world has never had.
+
+    A carcass with no recorded condition, out of a save written before bodies
+    remembered one, falls back to the flat CARRION_ENERGY this world paid for
+    every body until now.
+    """
+    if carcass.energy is None:
+        return CARRION_ENERGY
+    return _meat_value(carcass.energy)
 
 
 def _prey_on_the_hoof(creatures: list[Creature]) -> int:

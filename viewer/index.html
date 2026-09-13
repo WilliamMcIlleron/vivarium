@@ -180,7 +180,7 @@
     <span class="swatch"><span class="ring" style="border-color:var(--hunter-high);border-style:dashed"></span>menace (the wide sparse ring: how much ground this hunter's speed alone clears of feeding grazers, whether or not it ever catches one)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--nightfall);border-style:dotted"></span>nightfall (the cold indigo ring, on both species, appearing only once the light goes: what this animal can actually FIND in the present hour. The day/night wash is no longer decoration - darkness takes up to 1.5 tiles off a hunter's search for live prey, exactly the way the canopy does, and off a grazer's search for a plant, so the safest hours to be prey are also the hungriest ones. A grazer still sees an approaching hunter perfectly well at midnight, a carcass still takes no special eye to find, and the plants nobody finds in the dark stand and ripen until morning. Acuity is a predator's night vision: it is the only thing that buys the dark back.)</span>
     <span class="swatch"><span class="dot" style="background:var(--resource)"></span>resource (grows where light reaches the ground, so it clusters in the open - and fattens the longer nobody eats it: small and dark is freshly sprouted and worth what a resource here has always been worth, big and pale is a plant that has stood a hundred ticks, ringed once it can grow no further)</span>
-    <span class="swatch"><span class="ring" style="border-color:var(--carrion)"></span>carcass (a grazer's body - the only carrion a hunter can eat; fades as it rots)</span>
+    <span class="swatch"><span class="ring" style="border-color:var(--carrion)"></span>carcass (a grazer's body - the only carrion a hunter can eat; fades as it rots, and as of this run its SIZE and its orange quarry rim are what a scavenger would actually bank for it. A carcass used to be a flat 30 whatever condition the animal fell in, so a grazer the hunters had starved was worth four times more to them dead than alive; a body is worth the body now, which makes a starveling's corpse a bare speck and an old animal that died fat a genuine windfall.)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--carrion-inedible);border-style:dotted"></span>hunter remains (crossed out: predators no longer live off their own dead, so this is scenery)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--migrant);border-style:dashed"></span>migrant (just arrived, carries remembered genes)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--migrant);border-style:dotted"></span>the door (pulsing violet, with the absent species' own shape hollow inside it: where the next migrant of a species that has died out here would choose to come in - a grazer wants ground outside every hunter's menace radius and near something to eat, a hunter wants ground about a sense_range from the nearest prey. A real migrant only glances at two dozen tiles, so it lands near here rather than exactly here.)</span>
@@ -194,6 +194,7 @@
 const GRID = 40;
 const DAY_LENGTH_TICKS = 48;   // one full cycle per ~4 real hours at the 5-min simulate schedule - a deliberate choice for more visual variety per viewing session, not tied to a real calendar day
 const CARRION_DECAY = 40;      // must match CARRION_DECAY in rules/ecosystem.py - only used to fade a carcass out over its lifetime
+const CARRION_ENERGY = 30;     // must match CARRION_ENERGY - what a body whose condition this world never recorded is worth
 const SCAVENGEABLE_CARRION = ['grazer']; // must match SCAVENGEABLE_CARRION - whose bodies are actually food
 const MIGRANT_MARK_TICKS = 40; // how long a migrant keeps its arrival halo - viewer-only, nothing in the sim reads it
 const MAX_TRAIT = 3;           // upper bound of the genome traits in TRAIT_REGISTRY - used only to normalise them for drawing
@@ -289,6 +290,23 @@ function killValue(c) {
 }
 
 const MIN_KILL_VALUE = Math.floor(HUNT_EFFICIENCY * HUNT_FLESH);
+
+// Mirror of _carrion_value() in rules/ecosystem.py: what a scavenging hunter
+// actually banks for a body lying on the ground. A carcass used to be a flat
+// CARRION_ENERGY whatever shape the animal had been in, which meant a grazer
+// the predators had starved was worth nearly four times more to them dead than
+// alive - a bonus for having eaten your own food supply down to nothing. It is
+// worth what the animal was carrying now, through the same arithmetic a live
+// kill uses. A carcass with no recorded condition (from a save written before
+// bodies remembered one) falls back to the old flat number.
+function carrionValue(k) {
+  const e = k.energy;
+  if (e === undefined || e === null) return CARRION_ENERGY;
+  return Math.min(
+    HUNT_MAX_ENERGY,
+    Math.floor(HUNT_EFFICIENCY * (HUNT_FLESH + Math.max(0, e)))
+  );
+}
 
 // Mirror of _hunter_migration_chance() in rules/ecosystem.py, expressed as a
 // share of the flat rate this world has always used: how strongly the standing
@@ -783,18 +801,26 @@ function draw(now) {
     const cy = k.y * cell + cell / 2;
     const life = Math.max(0, Math.min(1, 1 - (k.age || 0) / CARRION_DECAY));
     const food = edibleCarrion(k);
+    // What this body is actually worth to a hunter (see _carrion_value in
+    // rules/ecosystem.py). A carcass is no longer a flat 30 whatever shape the
+    // animal fell in, so the ring's SIZE is now a readout of condition at
+    // death: a bare speck is a grazer that was starved to death and is barely
+    // a mouthful, a wide one is an animal that died old with a full belly.
+    const worth = food ? Math.max(0, Math.min(1,
+      (carrionValue(k) - MIN_KILL_VALUE) / (HUNT_MAX_ENERGY - MIN_KILL_VALUE))) : 0;
+    const r = cell * (food ? 0.11 + 0.17 * worth : 0.2);
     ctx.globalAlpha = food ? 0.18 + 0.62 * life : 0.12 + 0.38 * life;
     ctx.strokeStyle = food ? '#b9b2a4' : '#7a544c';
     ctx.lineWidth = Math.max(1, cell * (food ? 0.07 : 0.055));
     if (!food) ctx.setLineDash([cell * 0.07, cell * 0.09]);
     ctx.beginPath();
-    ctx.arc(cx, cy, cell * 0.2, 0, Math.PI * 2);
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
     ctx.stroke();
     ctx.setLineDash([]);
     ctx.beginPath();
     if (food) {
-      ctx.moveTo(cx - cell * 0.1, cy);
-      ctx.lineTo(cx + cell * 0.1, cy);
+      ctx.moveTo(cx - r * 0.5, cy);
+      ctx.lineTo(cx + r * 0.5, cy);
     } else {
       ctx.moveTo(cx - cell * 0.09, cy - cell * 0.09);
       ctx.lineTo(cx + cell * 0.09, cy + cell * 0.09);
@@ -803,6 +829,21 @@ function draw(now) {
     }
     ctx.stroke();
     ctx.globalAlpha = 1;
+    // ...and the same predator-orange quarry rim the LIVING grazers wear, for
+    // exactly the same reason: this is the body as a hunter sees it. A grazer
+    // now keeps its rim across its own death, dimming as the animal starved
+    // and brightening if it died fed - which is the whole change in one
+    // marking, because the rim used to vanish at death and be replaced by a
+    // flat payout worth more than the animal had ever been worth alive.
+    if (food && worth > 0) {
+      ctx.globalAlpha = (0.10 + 0.50 * worth) * (0.35 + 0.65 * life);
+      ctx.strokeStyle = '#ff8f6b';
+      ctx.lineWidth = Math.max(0.6, cell * (0.016 + 0.026 * worth));
+      ctx.beginPath();
+      ctx.arc(cx, cy, r + cell * 0.05, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
   }
 
   // the door: where the next migrant of an ABSENT species would come in.
@@ -1370,6 +1411,18 @@ function draw(now) {
   const edibleCount = carrionList.filter(edibleCarrion).length;
   const remainsCount = carrionList.length - edibleCount;
 
+  // The third standing stock in this world, and the last one to become a real
+  // number: what every edible body lying on the ground is actually worth to a
+  // scavenger (see _carrion_value in rules/ecosystem.py). Read it as the end
+  // of a line with "larder" (energy standing in plants) and "prey on the hoof"
+  // (energy standing in live grazers) - they are one budget leaking downstream
+  // now. A high carcass COUNT with a near-zero carrion larder is a field of
+  // animals that were starved rather than eaten, which used to be the richest
+  // thing on this grid for a hunter and is now the poorest.
+  const carrionLarder = carrionList
+    .filter(edibleCarrion)
+    .reduce((sum, k) => sum + carrionValue(k), 0);
+
   // Grazers that can currently see a hunter and are choosing to keep feeding
   // anyway - a predator inside sense_range but outside the flight ring THAT
   // predator earns. This is the number the new flight rule exists to move:
@@ -1415,6 +1468,7 @@ function draw(now) {
     `<span>prey draw <b>${preyDraw > 0
       ? (preyDraw * 100).toFixed(0) + '%' : 'shut'}</b></span>` +
     `<span>carcasses <b>${edibleCount}</b></span>` +
+    `<span>carrion larder <b>${carrionLarder}</b></span>` +
     `<span>hunter remains <b>${remainsCount}</b></span>`;
 
   const lineage = world.lineage || {};
