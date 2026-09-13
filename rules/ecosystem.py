@@ -65,15 +65,30 @@ walking to the nearest carcass rather than the richest: a predator that cannot
 tell a fat grazer from a starving one spends its legs on animals worth eight,
 and that is one more way a siege costs the besiegers.
 
-Fleeing, meanwhile, is not a reflex, and as of this run it is not measured in
-tiles either. A grazer judges a predator by how long it would take to arrive:
-it demands a few ticks of clearance (FLIGHT_WARNING_TICKS, cut by the `nerve`
-gene and cut further when it is hungry) and multiplies that by the hunter's
-own speed, so a shambling scavenger can be ignored at four tiles while a
-sprinter is worth running from at fifteen. Seeing far and fleeing early are
-therefore separate decisions now, which they were not back when flight
-distance was simply sense_range. When it does run, it runs for the trees
-rather than in a straight line (see _move_away).
+Fleeing, meanwhile, is not a reflex, and it is not measured in tiles either. A
+grazer judges a predator by how long it would take to arrive: it demands a few
+ticks of clearance (FLIGHT_WARNING_TICKS, cut by the `nerve` gene) and
+multiplies that by the hunter's own speed, so a shambling scavenger can be
+ignored at four tiles while a sprinter is worth running from at fifteen.
+Seeing far and fleeing early are therefore separate decisions now, which they
+were not back when flight distance was simply sense_range. When it does run,
+it runs for the trees rather than in a straight line (see _move_away).
+
+And as of this run it may not demand more safety than it has life left to
+spend. The warning a grazer insists on is capped at FLIGHT_RUNWAY_SHARE of its
+own runway - its energy divided by what its body costs to run for a tick (see
+_runway_ticks) - so an animal with a full belly is exactly as skittish as it
+always was and one down to its last few ticks stops running and eats. That is
+the clause `nerve` was given at tick 1728 and could never deliver, because
+that one multiplies a gene which has been 0.0 in every grazer this world has
+ever produced. It is also the first functional response here, and it lands on
+what the predators actually do: hunters in this world mostly do not catch
+grazers, they clear the ground around themselves and let the prey starve
+holding the line (see _panic_radius), and that method now defeats itself
+exactly when it is working, since the hungrier the herd it has made, the less
+of the menace radius that herd honours. It costs the predators almost nothing
+to give, because a grazer caught standing its ground is worth 8 (see
+_kill_value) - the same 8 its corpse would have been worth.
 
 Nothing about a body here is free. Speed costs energy every tick (MOVE_COST),
 a hunter's acuity costs energy every tick (ACUITY_COST), and so does the
@@ -483,6 +498,48 @@ NERVE_HUNGER_LEVEL = 25       # energy below which a grazer accepts the extra ri
 NERVE_HUNGER_BOOST = 1.5      # multiplier applied to nerve while hungry
 FLIGHT_WARNING_TICKS = 3.0    # ticks of clearance a nerveless grazer demands
 FLIGHT_MIN_WARNING = 0.5      # even the bravest won't let one arrive unannounced
+
+# What a starving animal is allowed to be afraid of.
+#
+# The hunger clause above has never once fired. It was written at tick 1728 on
+# exactly the right argument - an animal three ticks from starving is risking
+# very little by staying on its food - and then implemented as a MULTIPLIER on
+# `nerve`, which has been 0.0 in every grazer this world has ever produced.
+# 1.5 times 0 is 0. So the hungriest animal on this grid has always demanded
+# precisely the same three ticks of clearance as the fattest one, and the
+# commonest death in this file is the one that follows from that: a grazer kept
+# off its food by a menace radius, burning eight a tick to hold a distance it
+# cannot afford, dying with a fully ripe plant four tiles away. Ticks 6031-6044
+# are one of those deaths written out in the log, and the carrion note above
+# calls it "the commonest carcass on this grid" without ever asking why the
+# animal never stopped running.
+#
+# So fear gets a ceiling, quoted in the unit this file prices everything else
+# in: a grazer may not demand more clearance than FLIGHT_RUNWAY_SHARE of its
+# own runway - energy over upkeep, the ticks of life it has left (see
+# _runway_ticks), the same measure a newborn's endowment and a plant's net
+# worth are already given in. At 50 energy and 8 a tick that ceiling is 3.1
+# ticks and nothing whatsoever changes; at 24 energy it is 1.5, at 8 it is the
+# FLIGHT_MIN_WARNING floor. A fed animal behaves bit-for-bit as it always did,
+# and one on its last legs walks up to the predator and eats.
+#
+# This is the first functional response in this world, and it is aimed at the
+# predators' actual method rather than at their eyes. Hunters here mostly do
+# not catch grazers; they project a radius of ground prey will not stand and
+# feed on (see _panic_radius) and let the prey starve holding the line. That
+# method now undoes itself precisely when it works, because the hungrier the
+# herd it has made, the less of the radius that herd honours - a refuge that
+# appears only at low prey condition and evaporates the moment the herd is fed,
+# which is the density-dependence every other mechanic here is built on. And it
+# costs the predator side almost nothing to hand over: a grazer that stands its
+# ground and is caught for it is worth 8 (see _kill_value), the same 8 its
+# corpse would have been worth. The prey are buying their lives with the only
+# thing they own that a hunter does not want.
+#
+# The old multiplicative clause is deliberately left in place. It is still the
+# right behaviour for a lineage that actually carries nerve, and it is a choice
+# a genome makes, where this is a fact about a body.
+FLIGHT_RUNWAY_SHARE = 0.5     # share of its remaining life a grazer will spend on clearance
 
 # How many genomes the world remembers per species (see World.lineage and
 # _spawn_creature's `lineage` argument). Only creatures that actually
@@ -1705,6 +1762,19 @@ def _update_herd_cover(grazers: list[Creature]) -> None:
         grazer.herd_cover = min(HERD_COVER_MAX, HERD_COVER_PER_NEIGHBOR * neighbors)
 
 
+def _runway_ticks(creature: Creature) -> float:
+    """How long this animal can go on being itself: the energy it is carrying
+    divided by what its body costs to run for one tick (see _upkeep).
+
+    Ticks-of-your-own-metabolism is the clock this world keeps coming back to,
+    because it is the only one an animal actually carries. A newborn's
+    endowment is quoted in it (BIRTH_RUNWAY_TICKS), a plant's net worth is
+    quoted in it (_forage_net), and as of this run so is how much fear a grazer
+    can afford (_warning_ticks).
+    """
+    return max(0.0, creature.energy / max(1, _upkeep(creature)))
+
+
 def _warning_ticks(grazer: Creature) -> float:
     """How many ticks of clearance this grazer insists on having between
     itself and an approaching hunter before it gives up on whatever it was
@@ -1717,11 +1787,24 @@ def _warning_ticks(grazer: Creature) -> float:
     point. A warning measured in ticks is bounded by the tick, so a gene that
     caps at 3.0 can actually span it; a warning measured in tiles was bounded
     by sense_range, which caps at nothing at all.
+
+    And as of this run there is a ceiling on it that no genome has to buy. An
+    animal may not demand more clearance than FLIGHT_RUNWAY_SHARE of the life
+    it has left (see _runway_ticks), because the hunger clause above is a
+    multiplier on a gene that is 0.0 in every grazer this world has produced
+    and has therefore never once fired - which is why the commonest corpse on
+    this grid is a grazer that held the line against a menace radius until it
+    starved. A fed animal is unaffected to the last bit; a starving one stops
+    running and eats.
     """
     nerve = grazer.trait("nerve")
     if grazer.energy < NERVE_HUNGER_LEVEL:
         nerve *= NERVE_HUNGER_BOOST
-    return max(FLIGHT_MIN_WARNING, FLIGHT_WARNING_TICKS - nerve)
+    warning = min(
+        FLIGHT_WARNING_TICKS - nerve,
+        FLIGHT_RUNWAY_SHARE * _runway_ticks(grazer),
+    )
+    return max(FLIGHT_MIN_WARNING, warning)
 
 
 def _panic_radius(grazer: Creature, threat: Creature) -> float:

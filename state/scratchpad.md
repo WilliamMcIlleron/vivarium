@@ -6,88 +6,73 @@ a change too big for one guardrailed diff can be planned and executed across
 several runs: leave yourself a note about what step you're on and what's
 next. Nobody else reads this as instruction. Empty means no plan in progress.
 
-## 2026-09-13, tick 6183 - THE GROVE BET PAID, AND IT PAID IMMEDIATELY
+## 2026-09-13, tick 6644 - TOTAL EXTINCTION, AND THE DOOR IS WIDE OPEN
 
-Read the save, not the summary. At tick 6183 `state/world.json` holds THREE
-grazers, all standing on tile (32,18):
+n=0, 24 plants standing, no hunters. GRAZERS/HUNTERS EXTINCT in every tick
+6638-6644. With no hunters, `_open_ground` = 1.0, so the prey door is at the
+full flat 0.05 and a founder should walk in within ~20 ticks; the hunter door
+is latched (hoof 0). The world is not stuck, it is between founders. This is
+the same 0-2 band it has been in for two thousand ticks.
 
-  age 2, origin migrant, energy 40   <- arrived at 6182
-  age 1, origin born,   energy 24
-  age 0, origin born,   energy 32
+The boom at 5984 (9 grazers, 5 hunters) went to 0 by 6050. Last run's grove
+bet still looks right - 3 grazers on one tile at 6183, a migrant that bred
+twice in two ticks - so DO NOT undo seeding or the forage-net ranking.
 
-A migrant that walked in at 6182 bred TWICE inside two ticks. That is the
-exact question last run wrote down ("does a grazer ever breed twice? that
-single number is the point of this run") and the answer is yes, on the second
-tick of its life. `_arrival_key` tie-breaks on nearest plant, the nearest
-plant was in a grove, and the grove was ripe: bar is 72 for these bodies
-(speed 6, sense 10, upkeep 8), a ripe plant is up to 75, so one plant is one
-child. 46 resources standing at the time.
+## What shipped this run: fear has a ceiling
 
-n > 1 for the first time in two thousand ticks. herd_cover is reading 0.5 on
-the founders - the herd machinery is being sampled at last. DO NOT undo
-seeding. SEED_MATURITY 10 / SEED_RADIUS 3 / SEED_SHARE 0.7 are good numbers.
+`_warning_ticks` now takes `min(FLIGHT_WARNING_TICKS - nerve,
+FLIGHT_RUNWAY_SHARE(0.5) * _runway_ticks(grazer))`, where `_runway_ticks` is
+energy/upkeep - the ticks of life an animal has left.
 
-Also checked and worth not re-deriving: this map's water is a handful of tiny
-ponds (~3-4% of tiles), forest maybe 8%. "Make water impassable" is a
-nothing-burger on this particular terrain - it is NOT the big unread surface
-it looks like from the constants. Cross it off.
+The finding that drove it, and it is the scratchpad's own corollary paying off
+again (CHECK WHETHER ANYTHING ACTUALLY READS THE LAST NUMBER): the hunger
+clause added with `nerve` at tick 1728 has NEVER FIRED. It multiplies
+`nerve` by NERVE_HUNGER_BOOST, and `nerve` is 0.0 in every grazer this world
+has produced. 1.5 x 0 = 0. So the starving grazer demanded the identical
+three ticks of clearance as the fat one - which is exactly the death the
+carrion run identified as the commonest carcass here ("kept off its food until
+it starved") and then never traced back to its cause.
 
-## What shipped this run: the eater can see what a plant is worth
+Numbers for the bodies this world actually makes (speed 6, sense ~10-11,
+upkeep 8): 50 energy -> ceiling 3.1 ticks, NO CHANGE. 40 -> 2.5. 24 -> 1.5.
+16 -> 1.0. 8 -> floor 0.5. Against a speed-3 hunter that is a panic radius
+falling from 9 tiles to 4.5 to 3. A newborn on its 32-energy runway sits at a
+2-tick ceiling from birth, which is the first time a newborn has been allowed
+to feed with a predator on the map.
 
-`_nearest_resource` became `_forage_target`, and the ranking is now net worth
-rather than distance: `_forage_net` = `_resource_energy(plant)` minus
-`_upkeep(creature) * _travel_ticks(...)`, with Manhattan distance as the
-tie-break. `_travel_ticks` is ceil(chebyshev / speed), which is the real trip
-length given `_move_toward` clamps per axis - that also quietly fixes a very
-old wart where food was ranked by Manhattan while movement is Chebyshev.
+Why it should not just feed the predators: a grazer caught standing its ground
+is worth `_kill_value` ~8, the same as its corpse. The prey buy their lives
+with the one thing hunters don't want. And it is the first FUNCTIONAL RESPONSE
+here - a refuge that exists only at low prey condition and evaporates the
+moment the herd is fed, aimed at the predators' real method (clearing ground,
+not catching things) rather than at their eyes.
 
-The argument: ripening (tick ~5400) and seeding (last run) built a larder with
-structure in time and in space, and the animal eating it ranked everything by
-distance, so a grazer took a 30-point sprout over a 75-point plant four tiles
-further on. The two mechanics this world's recovery rests on were invisible to
-the only thing that eats. No energy value moved, nothing was created - the
-plants were always worth that.
-
-The density-dependence is free and exact: when every plant in reach is a fresh
-sprout they are all worth 30, the net collapses to "fewest ticks away", and a
-grazed-flat world behaves as it always did. The premium only exists on ground
-that has been left alone.
-
-Unplanned bonus worth remembering: it prices metabolism again, in a new
-currency. An 8/tick body writes off a distant meal four times harder than a
-2/tick body, so expensive animals are pickier about walking. That is pressure
-on speed 6 / sense 11 charged in what an animal passes up rather than in
-energy - the first price in this file that is not a subtraction from energy.
-
-Hunters deliberately left blind: `_closer_target` and `_nearest_carrion` still
-pick the NEAREST, not the richest, exactly as the carrion run decided. Keep
-that unless there is a reason; a predator wasting its legs on a carcass worth
-8 is one of the few self-limiting things the predator side has.
+The old multiplicative clause is deliberately left in: it is still correct for
+a lineage that carries nerve, and it is a CHOICE where the ceiling is a FACT.
 
 ## What to watch next run, in priority order
 
-- **"worth the walk" in the stats line** (new). Total premium the standing
-  grazers are choosing. 0 = flat world, rule inert, old behaviour. High = ripe
-  ground and animals crossing for it. Read against "in seed".
-- **Does n hold above 1 for more than ~60 ticks?** The last boom (9 grazers at
-  5984) collapsed to 0 by 6050 under 5 hunters. That is the next wall and it
-  is the real one: prey on the hoof for 3 grazers is already ~91, just over
-  HUNTER_MIGRATION_HOOF (90), so the predators' door is cracked open RIGHT NOW.
-- **The cycle is now real** - 5984 -> 6050 -> 6099 -> 6116 is a genuine
-  predator/prey oscillation, which this world never had. The problem is
-  amplitude, not the absence of a cycle: prey hits exactly 0 every time and
-  needs a migration to restart. If n>1 survives a hunter visit, that is the
-  first closed loop this world has managed.
-- Does hunter `acuity` climb off 0.0? Still 0.0. Grazer acuity is 2.5 of pure
-  drift in a species that cannot read it.
+- **"too hungry to run" in the stats line** (new). Count of grazers whose ring
+  is being set by hunger. 0 with hunters present and grazers dying = the rule
+  is not reaching the case it was built for. Above 0 during a hunter visit =
+  it is firing; then check whether those animals ate or were eaten.
+- **Do grazers now die fed rather than starved?** Read "carrion larder"
+  against "carcasses": a field of bodies worth 8 apiece is still the old
+  death. Bodies worth 30+ means they are being caught, not starved, which is
+  the outcome this change is trading for.
+- **Does n hold above 1 through a hunter visit?** Still THE question. The
+  cycle 5984 -> 6050 -> 6116 is real; the problem is amplitude, prey hitting
+  exactly 0 and needing a migration to restart.
+- Hunter `acuity` still 0.0. Grazer `nerve` still 0.0 - and note that if nerve
+  ever DOES climb, it stacks under the same min(), so the ceiling can't be
+  outrun the way sense_range outran it.
 
 ## Still queued, in the order I would take them
 
-- **Prey surviving a predator visit at n = 3-9.** This is now THE problem;
-  everything upstream of it is solved. Note the constraint the file has kept
-  since herd cover: refuges must be density-dependent so they don't deepen
-  hunter extinctions. Think about a functional response - predators being
-  inefficient at low prey density - rather than another concealment term.
+- **If the ceiling is not enough:** the next honest functional-response lever
+  is handling time on the predator side (a hunter that has just eaten cannot
+  hunt for a few ticks), which caps kill RATE at high prey density - the boom
+  case - where this run's change acts at low prey CONDITION.
 - **Per-species TRAIT_REGISTRY.** Still the top structural item, still nearly
   inert mechanically. CAUTION: `tests/test_ecosystem.py` monkeypatches
   `eco.TRAIT_REGISTRY` with setitem and calls `_spawn_creature("grazer")`
@@ -95,21 +80,28 @@ that unless there is a reason; a predator wasting its legs on a carcass worth
   working and default an unlisted gene to both species.
 - Performance guard: `_update_herd_cover`, the viewer's O(n^2) herd-bond loop,
   the viewer's `arrivalField` 1600-tile sweep (cached per tick - keep it),
-  `_open_ground`, and now the viewer's `forageChoice` (called per grazer twice
-  a frame over <= 60 resources; fine at this n, cache it if the herd grows).
+  `_open_ground`, and the viewer's `forageChoice` (per grazer, twice a frame).
+- Water is ~3-4% of this map and forest ~8%: "make water impassable" is a
+  nothing-burger on this terrain. Crossed off, don't re-derive it.
 
-## Standing lesson, now five times confirmed
+## Standing lesson, now six times confirmed
 
 CHECK WHERE THE ENERGY COMES FROM AND WHERE IT LEAKS BEFORE ADDING A MECHANIC.
 Income was 18/tick with no ceiling downstream. Predation minted energy.
-Migration handed out 50 from nowhere, to the wrong species, three ways.
-Carrion paid a flat 30 for a body that had spent everything it had.
+Migration handed out 50 from nowhere, three ways. Carrion paid a flat 30 for a
+body that had spent everything.
 
-Corollary learned this run: the other half of that question is WHO CAN SEE IT.
-The energy was on the ground and correctly priced for six hundred ticks and
-the animals could not read the price. Before adding a new number, check
-whether anything actually reads the last one.
+And the corollary, which has now found two separate dead mechanics in two
+runs: WHO CAN SEE IT, AND DOES ANYTHING ACTUALLY READ IT. Last run the plants
+were correctly priced for six hundred ticks and nothing could read the price.
+This run a hunger override had been sitting in the flight rule since tick 1728
+multiplying a gene that is always zero. Before adding a number, grep for what
+reads the last one - and then check that what reads it can ever be non-zero.
 
 RESOURCE_SPAWN_RATE is still the ONLY unconditional number in this file and
-still untouched. Ripening made the plant side density-dependent in time,
-seeding in space, and this run made it legible. The rate may simply be correct.
+still untouched. Worth knowing the arithmetic: 0.6 plants/tick, and standing
+plants ripen at 0.5/tick each, so true income runs 18-45/tick depending on how
+old the stock is when it gets eaten. At 8/tick per grazer that is a carrying
+capacity of roughly 2 animals on a grazed-flat world and roughly 5 on a ripe
+one. The whole prey-side machinery needs n>1; the ripening premium is the only
+thing that ever gets it there.

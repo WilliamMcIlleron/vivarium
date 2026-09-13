@@ -169,7 +169,7 @@
     <span class="swatch"><span class="speck"></span>canopy (forest: the only ground that hides a grazer from hunters - and almost nothing grows under it)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--vision);border-style:dashed"></span>perception (how far this animal can actually see - free out to 6 tiles, then one spoke on the ring for every energy/tick it burns keeping the extra horizon)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--creature-high)"></span>flight distance (the ground a grazer keeps between itself and one particular hunter: a few ticks of warning times that hunter's speed, so it is tight around a slow predator and enormous around a fast one - a ghost-faint ring means nothing is in sight and this is what it would keep)</span>
-    <span class="swatch"><span class="ring" style="border-color:var(--resource);border-style:dashed"></span>hungry nerve (amber: this grazer is starving and letting hunters come closer than it otherwise would)</span>
+    <span class="swatch"><span class="ring" style="border-color:var(--resource);border-style:dashed"></span>too hungry to run (the amber dashed ring, and it is a ring that is collapsing: a grazer may no longer demand more clearance from a predator than half the life it has left. A hunger clause has been in the rules since tick 1728 and never once fired, because it multiplied a gene every grazer here carries at 0.0 - so the starving animal held exactly the same line as the fat one and died holding it, which is what nearly every carcass on this grid actually is. A fed grazer's ring is unchanged to the last pixel; as one burns down its flight ring shrinks in around its own body until it is standing on the plant with a hunter in plain sight. It is the predators' own method turned back on them - they clear ground rather than catch anything, and the hungrier the herd they make, the less of that ground the herd honours - and it is cheap to grant, because a grazer caught standing its ground is worth 8 to the hunter, the same as its corpse.)</span>
     <span class="swatch"><span class="bar" style="background:var(--creature-high)"></span>herd bond (linked grazers are harder for a hunter to single out - brighter = deeper cover)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--creature-high);border-style:dotted"></span>gregariousness (how strongly a grazer walks to company instead of food)</span>
     <span class="swatch"><span class="arc"></span>breeding bar (the rose collar right on the body: a newborn is now sent out with four ticks of the body it inherits, and the parent has to save up for that first - so a WIDE collar is an expensive animal with a high bar to clear, and a FULL one is an animal that has cleared it)</span>
@@ -206,6 +206,7 @@ const NERVE_HUNGER_LEVEL = 25; // must match NERVE_HUNGER_LEVEL in rules/ecosyst
 const NERVE_HUNGER_BOOST = 1.5;// must match NERVE_HUNGER_BOOST
 const FLIGHT_WARNING_TICKS = 3;  // must match FLIGHT_WARNING_TICKS - ticks of clearance a nerveless grazer demands
 const FLIGHT_MIN_WARNING = 0.5;  // must match FLIGHT_MIN_WARNING
+const FLIGHT_RUNWAY_SHARE = 0.5; // must match FLIGHT_RUNWAY_SHARE - the share of its remaining life a grazer will spend keeping a predator at arm's length
 const TERRAIN_COVER = { f: 1.5, g: 0, s: 0, w: 0 }; // must match TERRAIN_COVER - how much a tile hides a grazer
 const MAX_COVER = 1.5;         // the largest value in TERRAIN_COVER, for normalising
 const NIGHT_COVER = 1.5;       // must match NIGHT_COVER in rules/ecosystem.py - tiles of reach the dark takes at midnight, from a hunter hunting and a grazer foraging alike
@@ -386,16 +387,38 @@ function grazerDrawShare(safeFraction) {
 // need it while drawing and not just in the stats line.
 const chebyshev = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
 
-// Mirrors of _warning_ticks() and _panic_radius() in rules/ecosystem.py.
-// Flight is no longer a distance a grazer owns by itself: it demands a few
-// TICKS of clearance, cut by nerve and cut further by hunger, and how many
-// tiles that buys depends entirely on how fast the particular hunter in front
-// of it moves. Kept in sync by hand - it's four lines, and the alternative is
-// the sim exporting a derived number it doesn't itself store.
-function warningTicks(c) {
+// Mirrors of _runway_ticks(), _warning_ticks() and _panic_radius() in
+// rules/ecosystem.py. Flight is not a distance a grazer owns by itself: it
+// demands a few TICKS of clearance, and how many tiles that buys depends
+// entirely on how fast the particular hunter in front of it moves.
+//
+// As of this run the warning has a ceiling that no gene has to pay for: an
+// animal may not demand more clearance than half the life it has left (see
+// FLIGHT_RUNWAY_SHARE). The hunger clause it replaces in practice multiplies
+// `nerve`, which has been 0.0 in every grazer this world has ever produced, so
+// the hungriest animal on the grid used to hold exactly the same line as the
+// fattest one and starve on it. A fed grazer's ring is unchanged; a starving
+// one's collapses onto its own body.
+function runwayTicks(c) {
+  return Math.max(0, (c.energy ?? 0) / Math.max(1, upkeep(c)));
+}
+
+function nerveWarning(c) {
   let nerve = (c.traits && c.traits.nerve) || 0;
   if ((c.energy ?? 0) < NERVE_HUNGER_LEVEL) nerve *= NERVE_HUNGER_BOOST;
-  return Math.max(FLIGHT_MIN_WARNING, FLIGHT_WARNING_TICKS - nerve);
+  return FLIGHT_WARNING_TICKS - nerve;
+}
+
+function warningTicks(c) {
+  return Math.max(FLIGHT_MIN_WARNING,
+    Math.min(nerveWarning(c), FLIGHT_RUNWAY_SHARE * runwayTicks(c)));
+}
+
+// Whether it is HUNGER rather than nerve that is setting this grazer's flight
+// distance - the runway ceiling biting is the animal deciding it can no longer
+// afford to run from anything.
+function tooHungryToRun(c) {
+  return FLIGHT_RUNWAY_SHARE * runwayTicks(c) < nerveWarning(c);
 }
 
 function panicRadius(c, threat) {
@@ -1147,7 +1170,15 @@ function draw(now) {
     const ref = flightReference(c, creatures);
     if (!ref) continue;
     const radius = panicRadius(c, ref.threat);
-    const hungry = (c.energy ?? 0) < NERVE_HUNGER_LEVEL;
+    // amber and dashed when HUNGER is what's setting this ring rather than
+    // nerve: a grazer may not demand more clearance than half the life it has
+    // left (see FLIGHT_RUNWAY_SHARE in rules/ecosystem.py), so a starving
+    // animal's ring collapses onto its own body and it stands and eats with a
+    // predator in plain sight. That is the whole of this run's change, and it
+    // should be the last thing you see before a grazer either recovers or is
+    // caught - a shrinking amber ring is an animal out of options, not a
+    // braver one.
+    const hungry = tooHungryToRun(c);
     const held = Math.max(0, Math.min(1,
       (FLIGHT_WARNING_TICKS - warningTicks(c)) / FLIGHT_WARNING_TICKS));
     const cx = c.drawX * cell + cell / 2;
@@ -1572,6 +1603,15 @@ function draw(now) {
     ? grazersHere.reduce((sum, c) => sum + warningTicks(c), 0) / grazersHere.length
     : 0;
 
+  // Grazers whose flight distance is being set by their own hunger rather than
+  // by their nerve (see FLIGHT_RUNWAY_SHARE in rules/ecosystem.py). Zero is a
+  // fed herd behaving exactly as this world always did. A number above zero is
+  // this world's first functional response actually firing: animals that can no
+  // longer afford to honour a hunter's menace radius, standing their ground on
+  // the food instead - and worth 8 apiece to whatever catches them, which is
+  // why the predators gain so little by it. Read it against "prey on the hoof".
+  const starvedCount = grazersHere.filter(tooHungryToRun).length;
+
   stats.innerHTML =
     `tick <b>${world.tick}</b>` +
     `<span>grazers <b>${world.grazers ?? grazerCount}</b></span>` +
@@ -1582,6 +1622,7 @@ function draw(now) {
     `<span>night cover <b>${dark.toFixed(1)}</b> tiles</span>` +
     `<span>holding nerve <b>${nerveCount}</b></span>` +
     `<span>flight warning <b>${warnAvg.toFixed(1)}</b> ticks</span>` +
+    `<span>too hungry to run <b>${starvedCount}</b></span>` +
     `<span>vision upkeep <b>${visionUpkeep}</b>/tick</span>` +
     `<span>breeding bar <b>${barAvg.toFixed(0)}</b></span>` +
     `<span>birth weight <b>${weightAvg.toFixed(0)}</b></span>` +
