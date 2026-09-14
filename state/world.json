@@ -1,238 +1,297 @@
 {
-  "tick": 6645,
+  "tick": 6831,
   "creatures": [],
   "resources": [
     {
+      "x": 3,
+      "y": 6,
+      "age": 76
+    },
+    {
+      "x": 0,
+      "y": 0,
+      "age": 70
+    },
+    {
+      "x": 7,
+      "y": 13,
+      "age": 62
+    },
+    {
+      "x": 38,
+      "y": 23,
+      "age": 53
+    },
+    {
+      "x": 0,
+      "y": 9,
+      "age": 52
+    },
+    {
+      "x": 37,
+      "y": 38,
+      "age": 50
+    },
+    {
+      "x": 10,
+      "y": 10,
+      "age": 49
+    },
+    {
+      "x": 5,
+      "y": 12,
+      "age": 47
+    },
+    {
       "x": 39,
-      "y": 1,
+      "y": 38,
+      "age": 46
+    },
+    {
+      "x": 39,
+      "y": 24,
       "age": 43
     },
     {
       "x": 38,
-      "y": 1,
-      "age": 40
+      "y": 9,
+      "age": 38
     },
     {
-      "x": 37,
-      "y": 1,
+      "x": 18,
+      "y": 11,
+      "age": 37
+    },
+    {
+      "x": 12,
+      "y": 9,
+      "age": 33
+    },
+    {
+      "x": 29,
+      "y": 39,
       "age": 31
     },
     {
-      "x": 9,
-      "y": 17,
-      "age": 30
+      "x": 30,
+      "y": 10,
+      "age": 28
     },
     {
-      "x": 38,
-      "y": 39,
-      "age": 27
+      "x": 8,
+      "y": 14,
+      "age": 26
     },
     {
-      "x": 36,
-      "y": 39,
-      "age": 25
-    },
-    {
-      "x": 13,
-      "y": 33,
+      "x": 23,
+      "y": 22,
       "age": 24
     },
     {
-      "x": 36,
-      "y": 34,
+      "x": 18,
+      "y": 3,
       "age": 23
     },
     {
-      "x": 39,
-      "y": 3,
-      "age": 22
-    },
-    {
-      "x": 17,
-      "y": 35,
+      "x": 24,
+      "y": 1,
       "age": 21
     },
     {
-      "x": 35,
-      "y": 39,
+      "x": 11,
+      "y": 8,
       "age": 20
     },
     {
-      "x": 1,
-      "y": 3,
+      "x": 3,
+      "y": 2,
       "age": 19
     },
     {
-      "x": 36,
-      "y": 37,
+      "x": 35,
+      "y": 6,
       "age": 17
     },
     {
-      "x": 36,
-      "y": 4,
-      "age": 15
+      "x": 15,
+      "y": 18,
+      "age": 16
     },
     {
-      "x": 36,
-      "y": 2,
+      "x": 4,
+      "y": 36,
       "age": 14
     },
     {
-      "x": 37,
-      "y": 0,
+      "x": 23,
+      "y": 8,
       "age": 13
     },
     {
-      "x": 38,
-      "y": 37,
+      "x": 2,
+      "y": 35,
       "age": 12
     },
     {
-      "x": 37,
-      "y": 37,
-      "age": 10
+      "x": 33,
+      "y": 12,
+      "age": 11
     },
     {
-      "x": 31,
-      "y": 27,
+      "x": 32,
+      "y": 2,
+      "age": 9
+    },
+    {
+      "x": 20,
+      "y": 3,
       "age": 7
     },
     {
-      "x": 22,
-      "y": 38,
-      "age": 6
+      "x": 39,
+      "y": 9,
+      "age": 5
     },
     {
-      "x": 36,
-      "y": 3,
+      "x": 22,
+      "y": 37,
       "age": 4
     },
     {
-      "x": 34,
-      "y": 4,
-      "age": 3
-    },
-    {
-      "x": 7,
-      "y": 3,
-      "age": 2
-    },
-    {
-      "x": 38,
-      "y": 32,
+      "x": 26,
+      "y": 21,
       "age": 1
+    },
+    {
+      "x": 6,
+      "y": 33,
+      "age": 0
     }
   ],
   "carrion": [
     {
-      "x": 1,
-      "y": 1,
-      "age": 35,
+      "x": 8,
+      "y": 36,
+      "age": 28,
       "species": "grazer",
       "energy": 0
     },
     {
-      "x": 0,
-      "y": 36,
+      "x": 9,
+      "y": 39,
+      "age": 24,
+      "species": "grazer",
+      "energy": 0
+    },
+    {
+      "x": 1,
+      "y": 32,
       "age": 23,
       "species": "grazer",
       "energy": 0
     },
     {
-      "x": 2,
-      "y": 38,
+      "x": 1,
+      "y": 32,
       "age": 21,
       "species": "grazer",
       "energy": 0
     },
     {
-      "x": 2,
-      "y": 38,
+      "x": 1,
+      "y": 32,
       "age": 20,
       "species": "grazer",
       "energy": 0
     },
     {
-      "x": 6,
-      "y": 1,
+      "x": 37,
+      "y": 29,
       "age": 19,
       "species": "grazer",
+      "energy": 0
+    },
+    {
+      "x": 6,
+      "y": 13,
+      "age": 6,
+      "species": "hunter",
       "energy": 0
     }
   ],
   "lineage": {
     "grazer": [
       {
-        "speed": 6,
+        "speed": 7,
         "sense_range": 9,
-        "camouflage": 0.0,
+        "camouflage": 0.5,
         "acuity": 3.0,
         "gregariousness": 1.0,
         "nerve": 3.0,
-        "provisioning": 1.5
+        "provisioning": 0.0
       },
       {
-        "speed": 6,
+        "speed": 7,
         "sense_range": 9,
-        "camouflage": 0.0,
+        "camouflage": 0.5,
         "acuity": 3.0,
         "gregariousness": 1.0,
         "nerve": 3.0,
-        "provisioning": 1.0
+        "provisioning": 0.0
       },
       {
-        "speed": 6,
+        "speed": 7,
         "sense_range": 9,
-        "camouflage": 0.0,
-        "acuity": 3.0,
+        "camouflage": 0.5,
+        "acuity": 2.5,
         "gregariousness": 1.0,
         "nerve": 3.0,
-        "provisioning": 1.0
+        "provisioning": 0.0
       },
       {
-        "speed": 6,
+        "speed": 8,
         "sense_range": 9,
-        "camouflage": 0.0,
-        "acuity": 3.0,
+        "camouflage": 0.5,
+        "acuity": 2.5,
         "gregariousness": 1.0,
         "nerve": 3.0,
-        "provisioning": 1.0
+        "provisioning": 0.0
       },
       {
-        "speed": 6,
+        "speed": 8,
         "sense_range": 9,
-        "camouflage": 0.0,
-        "acuity": 3.0,
+        "camouflage": 0.5,
+        "acuity": 2.5,
         "gregariousness": 1.0,
         "nerve": 3.0,
-        "provisioning": 1.0
+        "provisioning": 0.0
       },
       {
-        "speed": 6,
+        "speed": 8,
         "sense_range": 9,
-        "camouflage": 0.0,
-        "acuity": 3.0,
+        "camouflage": 0.5,
+        "acuity": 2.5,
         "gregariousness": 1.0,
         "nerve": 3.0,
-        "provisioning": 1.0
+        "provisioning": 0.0
       },
       {
-        "speed": 6,
+        "speed": 8,
         "sense_range": 9,
-        "camouflage": 0.0,
-        "acuity": 3.0,
+        "camouflage": 0.5,
+        "acuity": 2.5,
         "gregariousness": 1.0,
         "nerve": 3.0,
-        "provisioning": 1.0
+        "provisioning": 0.0
       },
       {
-        "speed": 6,
+        "speed": 8,
         "sense_range": 9,
-        "camouflage": 0.0,
-        "acuity": 3.0,
+        "camouflage": 0.5,
+        "acuity": 2.5,
         "gregariousness": 1.0,
         "nerve": 3.0,
-        "provisioning": 1.0
+        "provisioning": 0.0
       }
     ],
     "hunter": [

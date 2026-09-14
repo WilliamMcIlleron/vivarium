@@ -176,6 +176,7 @@
     <span class="swatch"><span class="core"></span>provisioning (the rose core, on either species: how much of itself this animal pours into each newborn on top of that runway - no energy is created, it only moves down a generation)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--hunter-high);border-width:2.5px"></span>quarry (the orange rim on a grazer: what a hunter would actually bank for catching it - the body plus everything that grazer has managed to eat, minus what is lost crossing between species - so a fed grazer glows to a predator and a starving one is barely worth the chase)</span>
     <span class="swatch"><span class="tri" style="border-bottom-color:var(--hunter-high)"></span>hunter (brighter = more energy)</span>
+    <span class="swatch"><span class="ring" style="border-color:#ffe6c8"></span>digesting (the pale ring: this hunter just ate and cannot hunt again for a few ticks - it still pays full upkeep and still moves, it simply isn't looking for its next meal. Shrinks in as the cooldown burns off. Without this a fat herd was worth eating exactly as fast as a hunter could walk between bodies, which is how 9 grazers and 5 hunters at tick 5984 were both gone by 6050.)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--hunter-high)"></span>acuity (rings around a hunter - sees through camouflage, herds and canopy, costs energy every tick)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--hunter-high);border-style:dashed"></span>menace (the wide sparse ring: how much ground this hunter's speed alone clears of feeding grazers, whether or not it ever catches one)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--nightfall);border-style:dotted"></span>nightfall (the cold indigo ring, on both species, appearing only once the light goes: what this animal can actually FIND in the present hour. The day/night wash is no longer decoration - darkness takes up to 1.5 tiles off a hunter's search for live prey, exactly the way the canopy does, and off a grazer's search for a plant, so the safest hours to be prey are also the hungriest ones. A grazer still sees an approaching hunter perfectly well at midnight, a carcass still takes no special eye to find, and the plants nobody finds in the dark stand and ripen until morning. Acuity is a predator's night vision: it is the only thing that buys the dark back.)</span>
@@ -223,6 +224,7 @@ const SEED_RADIUS = 3;           // must match SEED_RADIUS - how far a seed fall
 const HUNT_FLESH = 12;         // must match HUNT_FLESH - what a body is worth whatever shape it was in
 const HUNT_EFFICIENCY = 0.7;   // must match HUNT_EFFICIENCY - the share of a meal a predator actually banks
 const HUNT_MAX_ENERGY = 70;    // must match HUNT_MAX_ENERGY - ceiling on a single sitting
+const HUNT_COOLDOWN_TICKS = 4; // must match HUNT_COOLDOWN_TICKS - ticks a fed hunter spends digesting
 const MAX_MENACE_SPEED = 6;    // only used to normalise how loudly a hunter's menace ring is drawn
 const ARRIVAL_CANDIDATES = 24;   // must match ARRIVAL_CANDIDATES - how many tiles a real migrant actually looks at (the viewer looks at all 1600, so it draws the ideal door and the sim lands near it)
 const ARRIVAL_SAFE_MARGIN = 6;   // must match ARRIVAL_SAFE_MARGIN - clearance past which one safe tile is as good as another
@@ -1384,6 +1386,24 @@ function draw(now) {
     ctx.fill();
     ctx.shadowBlur = 0;
     ctx.globalAlpha = 1;
+
+    // digesting: a hunter that has just eaten cannot hunt again for
+    // HUNT_COOLDOWN_TICKS (see the `satiation` field in rules/ecosystem.py) -
+    // it still pays full upkeep and still moves, it simply is not looking for
+    // its next meal. Drawn as a pale ring shrinking in as the cooldown burns
+    // off, so a fed predator visibly sits out part of the hunt it would
+    // otherwise be pressing - the reason a boom of prey no longer collapses
+    // as fast as hunters can walk between bodies.
+    if ((c.satiation || 0) > 0) {
+      const full = Math.max(0, Math.min(1, c.satiation / HUNT_COOLDOWN_TICKS));
+      ctx.globalAlpha = c.alpha * (0.20 + 0.35 * full);
+      ctx.strokeStyle = '#ffe6c8';
+      ctx.lineWidth = Math.max(0.6, cell * 0.035);
+      ctx.beginPath();
+      ctx.arc(cx, cy, r + cell * (0.10 + 0.10 * full), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
   }
 
   // breeding bar: the collar of rose right on the body, and the one marking
@@ -1458,6 +1478,13 @@ function draw(now) {
   const grazerCount = creatures.filter(c => c.species !== 'hunter').length;
   const hunterCount = creatures.filter(c => c.species === 'hunter').length;
   const herdedCount = creatures.filter(c => c.species !== 'hunter' && (c.herd_cover || 0) > 0).length;
+
+  // Hunters currently digesting a meal (see HUNT_COOLDOWN_TICKS) - fed and
+  // temporarily out of the hunting pool, which is what should now cap how
+  // fast a boom of prey turns into a bust of them.
+  const digestingCount = creatures.filter(
+    c => c.species === 'hunter' && (c.satiation || 0) > 0
+  ).length;
 
   // Grazers currently standing on ground that hides them. This is the number
   // the canopy exists to move: a grazer under cover is harder for a hunter to
@@ -1616,6 +1643,7 @@ function draw(now) {
     `tick <b>${world.tick}</b>` +
     `<span>grazers <b>${world.grazers ?? grazerCount}</b></span>` +
     `<span>hunters <b>${world.hunters ?? hunterCount}</b></span>` +
+    `<span>digesting <b>${digestingCount}</b></span>` +
     `<span>in a herd <b>${herdedCount}</b></span>` +
     `<span>under canopy <b>${shelteredCount}</b></span>` +
     `<span>light <b>${(lightLevel(world.tick) * 100).toFixed(0)}%</b></span>` +

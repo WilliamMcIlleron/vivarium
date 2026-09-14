@@ -208,6 +208,26 @@ bloodline since the gene was added - a predator that wants to work the night
 shift must now buy the eyes for it. And the food nobody finds between dusk and
 dawn is food left standing, which ripens (see _resource_energy), so every night
 banks a little of the next morning.
+
+And as of this run a kill is not free to repeat immediately either. A hunter
+that has just eaten - by a kill or by scavenging - cannot hunt again for
+HUNT_COOLDOWN_TICKS: it still pays its full upkeep, it still moves, but it is
+not looking for prey or carrion, because it is digesting (see the `satiation`
+field on Creature). This is a second functional response alongside the
+runway-capped flight warning, aimed at the opposite side of the same problem:
+that one keeps a starving grazer from over-paying to flee a predator it can no
+longer afford to run from, this one keeps a well-fed predator from converting
+a fat herd into kills faster than the herd can replace itself. At tick 5984
+this grid held nine grazers and five hunters, and by 6050 it held none - a
+boom that became a total bust in sixty-six ticks, hunters gorging on abundant
+prey with nothing to slow the rate at which they did it. Handling time is the
+oldest idea in predator-prey ecology for exactly this: a predator can only
+process so many meals per unit time regardless of how much food is available,
+so the reason a hunter's kill rate should saturate rather than scale with prey
+density is now actually in the code rather than only implied by the
+kill-value coupling. It creates no energy and removes none - the same meal is
+worth the same amount whenever it is eaten - it only slows how fast a hunter
+can queue up the next one.
 """
 
 from __future__ import annotations
@@ -268,6 +288,18 @@ RESOURCE_ENERGY = 30                # what a plant is worth the tick it sprouts
 HUNT_FLESH = 12                     # what a body is worth whatever shape it was in
 HUNT_EFFICIENCY = 0.7               # of what it eats, the share a predator banks
 HUNT_MAX_ENERGY = 70                # ceiling on a single sitting
+
+# Handling time: a hunter that has just eaten - by a kill or by scavenging -
+# cannot look for its next meal for this many ticks (see the `satiation`
+# field on Creature). It still pays full upkeep and still moves, it simply
+# is not hunting. This is what actually caps kill RATE at high prey density,
+# which the kill-value coupling above never did on its own: a fat herd used
+# to be worth eating as fast as a hunter could walk between bodies, which is
+# how nine grazers and five hunters at tick 5984 became zero of either by
+# 6050. A hunter can still starve just as fast with this in place - the
+# ticks are digesting time, not immunity from upkeep - it just cannot also
+# be hunting during them.
+HUNT_COOLDOWN_TICKS = 4              # ticks a hunter spends digesting after any meal
 
 # The larder ripens.
 #
@@ -961,6 +993,10 @@ class Creature:
     # other grazers are standing nearby (see _update_herd_cover). Persisted
     # only so the viewer can draw the herd without recomputing it.
     herd_cover: float = 0.0
+    # NOT a gene either: ticks remaining before this hunter will look for
+    # another meal (see HUNT_COOLDOWN_TICKS). Set to the full cooldown the
+    # instant it eats, counted down once per tick, irrelevant to grazers.
+    satiation: int = 0
 
     def trait(self, name: str) -> float:
         default = TRAIT_REGISTRY[name][0] if name in TRAIT_REGISTRY else 0.0
@@ -1204,19 +1240,23 @@ class World:
         for creature in self.creatures:
             creature.age += 1
             if creature.species == "hunter":
-                prey = _nearest_creature(
-                    creature,
-                    grazers,
-                    camouflage_aware=True,
-                    terrain=self.terrain,
-                    dark=dark,
-                )
-                carcass = _nearest_carrion(creature, self.carrion)
-                target = _closer_target(creature, prey, carcass)
-                if target is not None:
-                    _move_toward(creature, target)
-                else:
+                if creature.satiation > 0:
+                    creature.satiation -= 1
                     _move_random(creature)
+                else:
+                    prey = _nearest_creature(
+                        creature,
+                        grazers,
+                        camouflage_aware=True,
+                        terrain=self.terrain,
+                        dark=dark,
+                    )
+                    carcass = _nearest_carrion(creature, self.carrion)
+                    target = _closer_target(creature, prey, carcass)
+                    if target is not None:
+                        _move_toward(creature, target)
+                    else:
+                        _move_random(creature)
             else:
                 threat = _flight_threat(creature, hunters)
                 if threat is not None:
@@ -1259,6 +1299,7 @@ class World:
                 # what it was carrying, not what it was about to carry.
                 gain = _kill_value(prey)
                 hunter.energy += gain
+                hunter.satiation = HUNT_COOLDOWN_TICKS
                 self.events.append(
                     f"hunt: grazer {prey.id[:8]} eaten at ({hunter.x},{hunter.y})"
                     f" worth {gain}"
@@ -1281,6 +1322,7 @@ class World:
                 self.carrion.remove(carcass)
                 gain = _carrion_value(carcass)
                 hunter.energy += gain
+                hunter.satiation = HUNT_COOLDOWN_TICKS
                 self.events.append(
                     f"scavenge: carcass eaten at ({hunter.x},{hunter.y}) worth {gain}"
                 )
