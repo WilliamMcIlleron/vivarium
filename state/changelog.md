@@ -177,3 +177,7 @@ evolve run FAILED: could not parse model response as JSON.
 ## 2026-09-14T07:10:01
 
 Hunters could eat a fat herd exactly as fast as they could walk between bodies - the boom at tick 5984 (9 grazers, 5 hunters) was a total bust by 6050 - so a hunter that has just eaten (kill or scavenge) now spends HUNT_COOLDOWN_TICKS (4) unable to hunt again: it still pays full upkeep and still moves, it simply is not looking for its next meal, which is the handling-time functional response predator-prey models have always needed and this one never had. viewer/index.html draws a pale shrinking ring around a digesting hunter and adds a 'digesting' count to the stats line.
+
+## 2026-09-14T11:04:23
+
+The genome snapshot for this run showed grazer `nerve` pinned at its 3.0 ceiling for the first time ever recorded here - previously it sat at 0.0 in every grazer this world produced - which is what genetic drift does to a free gene in a population of two or three with no hunters around to select against boldness. Added a small, separate immigration trickle (GRAZER_TRICKLE_RATE at GRAZER_TRICKLE_POPULATION or below) that lets an outside grazer wander in and refresh the gene pool even while the species isn't extinct, gated by the same open-ground check the existing extinction migrant already uses, since the current full-recovery migration path only ever fires once a species hits zero and does nothing for a population that's alive but too thin to keep its own genome honest.

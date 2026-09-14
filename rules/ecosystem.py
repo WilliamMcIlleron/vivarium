@@ -744,6 +744,37 @@ PROVISION_ENERGY = 6
 HUNTER_MIGRATION_RATE = 0.02
 GRAZER_MIGRATION_RATE = 0.05
 
+# A trickle of outside blood for a population that is alive but too thin to
+# keep its own gene pool honest - a different failure mode from having no
+# population at all, and one the full re-founding migrant above never
+# touches, because it only ever fires on total extinction.
+#
+# Tick 6863's genome snapshot is the evidence: nerve sits at exactly its
+# ceiling, 3.0, in every one of the three grazers alive, the first time this
+# world has ever recorded that gene above 0.0. Nerve deliberately carries no
+# per-tick cost the way speed or acuity do - its price was always meant to be
+# paid in blood, once a hunter is standing on the grid to collect it (see
+# FLIGHT_WARNING_TICKS above). But hunters have been extinct for the last
+# twenty ticks running, so there has been nothing to select against a herd
+# that no longer runs, and a population of two or three is small enough that
+# a symmetric mutation step can walk a gene to its cap by pure chance long
+# before selection gets a vote - the same small-population problem a lineage
+# bottleneck is normally the cure for, except the cure only administers
+# itself when the patient has already died.
+#
+# So a grazer can now wander in from outside even while the species is not
+# extinct, at GRAZER_TRICKLE_RATE - a small fraction of the ordinary
+# GRAZER_MIGRATION_RATE - whenever the standing count is at or below
+# GRAZER_TRICKLE_POPULATION. It draws from the same lineage memory as any
+# other migrant, so it is not a fresh unrelated genome, just one more mutated
+# sample of the remembered stock; and it is gated by the same open-ground
+# check the extinction migrant already uses (_open_ground), so it never posts
+# an animal into a siege either. No energy value moves and nothing is
+# guaranteed - this only ever adds a chance of gene flow to a population
+# already thin enough to need it.
+GRAZER_TRICKLE_POPULATION = 3   # standing count at or below which trickle immigration can fire
+GRAZER_TRICKLE_RATE = 0.01      # per-tick chance at that population, gated by open ground
+
 # How rich the prey has to be before a predator makes the journey.
 #
 # Hunter migration has been an unconditional coin flip since the first tick,
@@ -1194,6 +1225,19 @@ class World:
             )
             self.creatures.append(migrant)
             self.events.append("a grazer migrates into the world")
+        elif random.random() < _grazer_trickle_chance(self.creatures):
+            # Not a re-founding after extinction - the species is still here,
+            # just thin enough that drift rather than selection is deciding
+            # its genome (see GRAZER_TRICKLE_POPULATION). Same lineage draw,
+            # same arrival-site logic, a different reason for coming.
+            migrant = _spawn_creature(
+                "grazer", lineage=self.lineage.get("grazer"), origin="migrant"
+            )
+            migrant.x, migrant.y = _arrival_site(
+                migrant, self.creatures, self.resources
+            )
+            self.creatures.append(migrant)
+            self.events.append("a grazer wanders in from outside")
 
         grazers = [c for c in self.creatures if c.species == "grazer"]
         hunters = [c for c in self.creatures if c.species == "hunter"]
@@ -2299,6 +2343,23 @@ def _grazer_migration_chance(creatures: list[Creature]) -> float:
         return 0.0
     span = max(1e-9, GRAZER_MIGRATION_FULL - GRAZER_MIGRATION_OPEN)
     return GRAZER_MIGRATION_RATE * min(1.0, (room - GRAZER_MIGRATION_OPEN) / span)
+
+
+def _grazer_trickle_chance(creatures: list[Creature]) -> float:
+    """A small, separate chance of a grazer wandering in even while the
+    species is NOT extinct, when the standing population is small enough that
+    genetic drift rather than selection is what decides which alleles survive
+    here (see GRAZER_TRICKLE_POPULATION for the full argument). Zero once the
+    species is gone entirely - that case belongs to _grazer_migration_chance,
+    the full re-founding migrant - and zero above GRAZER_TRICKLE_POPULATION,
+    where the population is large enough for selection to do its own work.
+    Gated by the same open ground a re-founding migrant requires, so this
+    never posts an animal into a siege either.
+    """
+    grazers = [c for c in creatures if c.species == "grazer"]
+    if not grazers or len(grazers) > GRAZER_TRICKLE_POPULATION:
+        return 0.0
+    return GRAZER_TRICKLE_RATE * _open_ground(creatures)
 
 
 def _resource_at(resources: list[Resource], x: int, y: int) -> Resource | None:
