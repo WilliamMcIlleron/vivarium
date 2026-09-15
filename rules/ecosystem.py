@@ -828,6 +828,25 @@ GRAZER_MIGRATION_RATE = 0.05
 GRAZER_TRICKLE_POPULATION = 3   # standing count at or below which trickle immigration can fire
 GRAZER_TRICKLE_RATE = 0.01      # per-tick chance at that population, gated by open ground
 
+# What the trickle migrant above actually carries.
+#
+# Tick 6863 found grazer `nerve` sitting at its 3.0 ceiling in every animal on
+# the grid, and by tick 7041 it still was - a hundred and eighty ticks after
+# the trickle above was supposed to be curing exactly this. It cannot, on its
+# own: the trickle draws from World.lineage, and LINEAGE_MEMORY only records
+# breeders, so once every recent breeder carries nerve 3.0 a "fresh outside
+# draw" is just another copy of the same drifted genome. The cure was drawing
+# from a well that had already gone stale.
+#
+# So a trickle migrant now sometimes bypasses lineage altogether and arrives
+# at the flat species default instead - nerve 0.0, camouflage 0.0, the
+# genome this world started with - at GRAZER_TRICKLE_FRESH_SHARE of the time.
+# It is still gated by the same population and open-ground checks as any
+# other trickle, so it is exactly as rare and exactly as safe; what changes
+# is that roughly one trickle migrant in three can no longer be a copy of
+# the very drift it exists to correct.
+GRAZER_TRICKLE_FRESH_SHARE = 0.3
+
 # How rich the prey has to be before a predator makes the journey.
 #
 # Hunter migration has been an unconditional coin flip since the first tick,
@@ -1281,10 +1300,17 @@ class World:
         elif random.random() < _grazer_trickle_chance(self.creatures):
             # Not a re-founding after extinction - the species is still here,
             # just thin enough that drift rather than selection is deciding
-            # its genome (see GRAZER_TRICKLE_POPULATION). Same lineage draw,
-            # same arrival-site logic, a different reason for coming.
+            # its genome (see GRAZER_TRICKLE_POPULATION). Same arrival-site
+            # logic, a different reason for coming - and, at
+            # GRAZER_TRICKLE_FRESH_SHARE of the time, a different source too:
+            # the flat species default rather than a lineage memory that may
+            # itself have already drifted to the same corner it is meant to
+            # correct (see GRAZER_TRICKLE_FRESH_SHARE).
+            fresh = random.random() < GRAZER_TRICKLE_FRESH_SHARE
             migrant = _spawn_creature(
-                "grazer", lineage=self.lineage.get("grazer"), origin="migrant"
+                "grazer",
+                lineage=None if fresh else self.lineage.get("grazer"),
+                origin="migrant",
             )
             migrant.x, migrant.y = _arrival_site(
                 migrant, self.creatures, self.resources
