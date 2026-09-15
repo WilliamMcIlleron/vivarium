@@ -172,7 +172,7 @@
     <span class="swatch"><span class="ring" style="border-color:var(--resource);border-style:dashed"></span>too hungry to run (the amber dashed ring, and it is a ring that is collapsing: a grazer may no longer demand more clearance from a predator than half the life it has left. A hunger clause has been in the rules since tick 1728 and never once fired, because it multiplied a gene every grazer here carries at 0.0 - so the starving animal held exactly the same line as the fat one and died holding it, which is what nearly every carcass on this grid actually is. A fed grazer's ring is unchanged to the last pixel; as one burns down its flight ring shrinks in around its own body until it is standing on the plant with a hunter in plain sight. It is the predators' own method turned back on them - they clear ground rather than catch anything, and the hungrier the herd they make, the less of that ground the herd honours - and it is cheap to grant, because a grazer caught standing its ground is worth 8 to the hunter, the same as its corpse.)</span>
     <span class="swatch"><span class="bar" style="background:var(--creature-high)"></span>herd bond (linked grazers are harder for a hunter to single out - brighter = deeper cover)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--creature-high);border-style:dotted"></span>gregariousness (how strongly a grazer walks to company instead of food)</span>
-    <span class="swatch"><span class="arc"></span>breeding bar (the rose collar right on the body: a newborn is now sent out with four ticks of the body it inherits, and the parent has to save up for that first - so a WIDE collar is an expensive animal with a high bar to clear, and a FULL one is an animal that has cleared it)</span>
+    <span class="swatch"><span class="arc"></span>breeding bar (the rose collar right on the body: a newborn is sent out with four ticks of the body it inherits, and the parent has to save up for that first - so a WIDE collar is an expensive animal with a high bar to clear, and a FULL one is an animal that will breed this tick. As of this run the collar carries a second mark: a short radial NOTCH at the energy the parent will be left holding afterwards. That was a flat 20 for every grazer that has ever lived here, which is twenty ticks of life for a speed-1 body and two and a half for the speed-7 ones this world actually breeds - so reproduction was one animal splitting into two that were both a few ticks from starving, which is why this grid keeps showing two or three grazers and then none. A parent must now keep four ticks of its own upkeep as well, floored at that old 20, and the shortfall is added to the bar. The arc from the notch round to the top of the ring is all a birth actually spends; everything below the notch is life the animal is required to still be carrying when it is done. Nothing changes for a cheap body, and nothing about the energy a birth burns changes for any body.)</span>
     <span class="swatch"><span class="core"></span>provisioning (the rose core, on either species: how much of itself this animal pours into each newborn on top of that runway - no energy is created, it only moves down a generation)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--hunter-high);border-width:2.5px"></span>quarry (the orange rim on a grazer: what a hunter would actually bank for catching it - the body plus everything that grazer has managed to eat, minus what is lost crossing between species - so a fed grazer glows to a predator and a starving one is barely worth the chase)</span>
     <span class="swatch"><span class="tri" style="border-bottom-color:var(--hunter-high)"></span>hunter (brighter = more energy)</span>
@@ -235,11 +235,12 @@ const GRAZER_MIGRATION_FULL = 0.55; // must match GRAZER_MIGRATION_FULL - share 
 const MOVE_COST = 1;           // must match MOVE_COST in rules/ecosystem.py - energy/tick per point of speed
 const ACUITY_COST = 1;         // must match ACUITY_COST - energy/tick per full point of a hunter's acuity
 const BIRTH_RUNWAY_TICKS = 4;  // must match BIRTH_RUNWAY_TICKS - ticks of its own upkeep a newborn starts with
+const PARENT_RUNWAY_TICKS = 4; // must match PARENT_RUNWAY_TICKS - ticks of its own upkeep a parent must still be holding once it has bred
 const REPRODUCE = {            // must match REPRODUCE - the species baselines the bar is measured from
   grazer: { threshold: 60, cost: 40 },
   hunter: { threshold: 110, cost: 55 },
 };
-const MAX_SURCHARGE = 24;      // only used to normalise how far a creature's breeding collar is pushed out
+const MAX_SURCHARGE = 40;      // only used to normalise how far a creature's breeding collar is pushed out (raised this run: the bar now carries the parent's own runway as well as the child's, so an expensive body sits much further above its species baseline)
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 const stats = document.getElementById('stats');
@@ -550,9 +551,21 @@ function birthWeight(c) {
   return Math.max(Math.floor(repro.cost / 2), BIRTH_RUNWAY_TICKS * upkeep(c));
 }
 
+// Mirror of _parent_keep(): what this animal must STILL be holding the tick
+// after it breeds. A parent used to be left with a flat `threshold - cost`
+// whatever body it had - 20 energy, twenty ticks of life for a speed-1 grazer
+// and two and a half for the speed-7 ones this world actually breeds - so a
+// birth here was one animal splitting into two that were both a few ticks from
+// starving. It is four ticks of its own upkeep now, floored at that old flat
+// number, and the shortfall is added to the bar it has to clear first.
+function parentKeep(c) {
+  const repro = REPRODUCE[c.species] || REPRODUCE.grazer;
+  return Math.max(repro.threshold - repro.cost, PARENT_RUNWAY_TICKS * upkeep(c));
+}
+
 function breedingBar(c) {
   const repro = REPRODUCE[c.species] || REPRODUCE.grazer;
-  return repro.threshold + birthWeight(c) - Math.floor(repro.cost / 2);
+  return repro.cost + birthWeight(c) - Math.floor(repro.cost / 2) + parentKeep(c);
 }
 
 // Mirror of _provision() in rules/ecosystem.py, minus the parent's affordability
@@ -1445,6 +1458,29 @@ function draw(now) {
       ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2);
       ctx.stroke();
     }
+
+    // ...and the notch is where it falls back TO. The bar priced the child's
+    // first few ticks and left the parent holding a flat 20 whatever body it
+    // had, which for the speed-7 grazers this world actually breeds is two and
+    // a half ticks of life - so a birth was one animal splitting into two that
+    // were both nearly dead. A parent must now keep four ticks of its own
+    // upkeep as well (see _parent_keep in rules/ecosystem.py), and this tick
+    // across the collar marks that floor on the same dial as the bar itself:
+    // the arc from the notch round to the top is the only part of a full
+    // collar that reproduction actually spends, and everything below the notch
+    // is the life the parent is required to still be carrying afterwards. On a
+    // cheap animal the notch sits high and nothing has changed; on an
+    // expensive one it climbs, and the collar widens under it.
+    const keepAngle = -Math.PI / 2 +
+      Math.max(0, Math.min(1, parentKeep(c) / bar)) * Math.PI * 2;
+    ctx.globalAlpha = c.alpha * (frac >= 1 ? 0.75 : 0.40);
+    ctx.lineWidth = Math.max(0.6, cell * 0.032);
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(keepAngle) * (r - cell * 0.11),
+               cy + Math.sin(keepAngle) * (r - cell * 0.11));
+    ctx.lineTo(cx + Math.cos(keepAngle) * (r + cell * 0.11),
+               cy + Math.sin(keepAngle) * (r + cell * 0.11));
+    ctx.stroke();
     ctx.globalAlpha = 1;
   }
 
@@ -1520,6 +1556,19 @@ function draw(now) {
     : 0;
   const barAvg = creatures.length
     ? creatures.reduce((sum, c) => sum + breedingBar(c), 0) / creatures.length
+    : 0;
+
+  // ...and the half of that transaction that was never priced until now: what
+  // a parent is left holding once it has bred (see _parent_keep in
+  // rules/ecosystem.py). It was a flat 20 for every grazer that ever lived
+  // here, which is twenty ticks of life for a cheap body and two and a half
+  // for the speed-7 ones this world actually produces - so read it against
+  // "birth weight": when the two are roughly equal, a birth leaves behind two
+  // animals with the same few ticks to find food in, and when "parent keep"
+  // sits at the old flat 20 the animal is cheap enough that none of this
+  // touches it.
+  const keepAvg = creatures.length
+    ? creatures.reduce((sum, c) => sum + parentKeep(c), 0) / creatures.length
     : 0;
 
   // Carcasses split by whether a hunter can actually eat them. "carcasses" is
@@ -1654,6 +1703,7 @@ function draw(now) {
     `<span>vision upkeep <b>${visionUpkeep}</b>/tick</span>` +
     `<span>breeding bar <b>${barAvg.toFixed(0)}</b></span>` +
     `<span>birth weight <b>${weightAvg.toFixed(0)}</b></span>` +
+    `<span>parent keep <b>${keepAvg.toFixed(0)}</b></span>` +
     `<span>brood stake <b>${broodAvg.toFixed(1)}</b></span>` +
     `<span>resources <b>${(world.resources || []).length}</b></span>` +
     `<span>larder <b>${larder}</b></span>` +

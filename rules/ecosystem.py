@@ -118,6 +118,22 @@ higher bar to clear every single generation, which puts selection on
 metabolism at the reproductive bottleneck instead of only in slow attrition -
 the one place it can still act in a population of two.
 
+And as of this run so is the other half of that same transaction. The runway
+priced what the CHILD needed and left the parent holding whatever it always
+held - a flat `threshold - cost`, 20 energy for a grazer, unchanged since the
+first tick. That number was written for an animal burning 1 a tick. The
+grazers this world actually breeds burn 8, so 20 is two and a half ticks, and
+reproduction here was not a parent having a child but one animal splitting
+into two animals that were both a few ticks from starving. A parent must now
+keep PARENT_RUNWAY_TICKS ticks of its own upkeep as well (see _parent_keep),
+and the difference is added to the bar it has to clear first. Nothing is
+created and nothing is destroyed that was not destroyed before; a cheap body
+breeds at exactly the number it always did; an expensive one has to have
+saved for its own survival as well as its child's. What it buys is a birth
+that ADDS an animal rather than replacing one, which is the only way a
+population compounds - and every prey-side mechanic in this file is waiting
+on a population that compounds.
+
 A kill is no longer a flat payout either. A hunter gains the body itself plus
 whatever energy the grazer had managed to bank, and only part of that survives
 the crossing between trophic levels (see _kill_value). A fat grazer is a feast;
@@ -695,6 +711,43 @@ REPRODUCE = {
 # larder thins, the bar is what decides who keeps breeding, and that is the
 # cheap animal every time.
 BIRTH_RUNWAY_TICKS = 4
+
+# What a parent must still be holding the tick after it breeds.
+#
+# BIRTH_RUNWAY_TICKS priced the CHILD's first few ticks in the currency of the
+# body it inherits, and left the other half of the same transaction exactly
+# where it found it. Whatever the bar is, an animal that clears it walks away
+# from the birth holding `threshold - cost`: a flat 20 for a grazer, the same
+# 20 it has been since the first tick. That number was written when a grazer
+# burned 1 energy a tick and meant twenty ticks of life. The grazers this world
+# actually breeds are at speed 7 with an eight-tile horizon - the genome
+# snapshot at tick 7041 - which is 8 a tick, and 20 energy is two and a half
+# ticks. So reproduction here is not a parent having a child. It is one animal
+# splitting into two animals that are both a handful of ticks from starving, on
+# a grid holding fifteen plants, and the commonest thing that happens next is
+# that both of them die. That is the shape of this world's entire population
+# record: grazers appear at two, three, four, and are back to zero inside a few
+# dozen ticks, with no hunter standing anywhere near them.
+#
+# So the aftermath is priced the way the endowment already is. A parent must
+# keep PARENT_RUNWAY_TICKS ticks of its own upkeep (see _parent_keep), floored
+# at the flat `threshold - cost` every parent in this world has always been
+# left with, and the shortfall is added to the bar it has to clear before it
+# may breed at all (see _breeding_bar). A cheap animal is untouched to the last
+# point: at speed 1 a grazer's four ticks cost 4 and the old floor of 20 is
+# five times that, so its bar is exactly the 60 it has always been - and the
+# hunters as they currently stand are unchanged too, since 55 dwarfs four ticks
+# of a speed-3 body. An expensive one pays at the bottleneck twice, once for
+# the child's runway and once for its own.
+#
+# It creates no energy and destroys none. A birth still burns precisely
+# `cost - cost // 2` between the two animals, exactly as it did; what moves is
+# only how fat the parent has to be before it is allowed to spend it. And what
+# that buys is the one thing this world has never managed on the prey side: a
+# birth that ADDS an animal instead of replacing one. A population that can
+# only replace itself cannot compound, and herd cover, gregariousness and the
+# groves are all waiting on a population that compounds.
+PARENT_RUNWAY_TICKS = 4
 
 # Parental provisioning: extra energy a parent hands to its newborn, on top of
 # the standard endowment, per point of the `provisioning` gene.
@@ -1798,20 +1851,44 @@ def _birth_weight(parent: Creature) -> int:
     return max(cost // 2, BIRTH_RUNWAY_TICKS * _upkeep(parent))
 
 
-def _breeding_bar(parent: Creature) -> int:
-    """The energy THIS animal has to reach before it may reproduce: the species
-    threshold, plus whatever its newborn's runway costs above the old flat
-    endowment. A creature living inside that flat floor breeds at exactly the
-    number it always did.
+def _parent_keep(parent: Creature) -> int:
+    """What this animal has to be left holding the tick after it breeds:
+    PARENT_RUNWAY_TICKS ticks of its own upkeep, and never less than the flat
+    `threshold - cost` every parent in this world has always kept.
 
-    Note what does NOT change: the parent is left holding `threshold - cost`
-    when it breeds at its own bar, whatever that bar is, so this moves the
-    price of admission and never the aftermath. The bar is the only new
-    pressure here, and it is a pressure on metabolism at the one moment
-    metabolism has never yet been priced.
+    The mirror of _birth_weight, in the same unit and for the same reason. A
+    body that is expensive to run is expensive to run AFTER a birth as well as
+    before one, and until now only the child's half of that was priced - which
+    is why a speed-7 grazer clearing its bar was left with two and a half ticks
+    of life and a newborn with four, and why a birth here has mostly meant two
+    corpses rather than two animals.
     """
     repro = REPRODUCE[parent.species]
-    return repro["threshold"] + _birth_weight(parent) - repro["cost"] // 2
+    return max(
+        repro["threshold"] - repro["cost"],
+        PARENT_RUNWAY_TICKS * _upkeep(parent),
+    )
+
+
+def _breeding_bar(parent: Creature) -> int:
+    """The energy THIS animal has to reach before it may reproduce: what the
+    birth itself takes off it (the species cost, plus whatever its newborn's
+    runway costs above the old flat endowment) plus what it must still be
+    holding when the birth is over (see _parent_keep). A creature living inside
+    both flat floors breeds at exactly the number it always did.
+
+    Both halves are quoted in ticks of the parent's own metabolism now, which
+    is the only clock an animal here carries. The aftermath is no longer a
+    constant: a cheap grazer walks away from a birth with twenty ticks of life
+    exactly as it always has, and an expensive one may no longer walk away with
+    two - it has to have saved for its own survival as well as its child's
+    before this world will let it breed. The amount a birth actually spends is
+    untouched, so this moves the price of admission and the condition the
+    parent is in on the far side of it, and no energy at all.
+    """
+    repro = REPRODUCE[parent.species]
+    spend = repro["cost"] + _birth_weight(parent) - repro["cost"] // 2
+    return spend + _parent_keep(parent)
 
 
 def _provision(parent: Creature) -> int:
