@@ -183,6 +183,21 @@ a migrant wanders back in, that migrant arrives as a mutated descendant of the
 remembered stock instead of a blank species default - so an extinction is a
 bottleneck, not a factory reset.
 
+And as of this run that memory is checked against the world's own budget
+before it is used. Lineage records BREEDERS, and the only grazers that have
+bred here in a very long time are the speed-8 stock that burns 11 energy a
+tick against an income of 18 - a body with a carrying capacity of one and a
+half animals - so every total extinction re-founded this world with another
+copy of precisely the animal that had just failed to live in it, and because
+that copy never bred either, nothing new was ever written back. The memory of
+what worked here had become a memory of what killed the place, and it was
+self-sealing. A remembered genome this range could carry a population of is
+still drawn exactly as before; one costing more per tick than the world earns
+divided among FOUNDING_CAPACITY animals is increasingly likely to be passed
+over for an outsider at the flat species default (see _founding_reset_chance).
+The gate closes itself the instant a bloodline cheap enough to breed here
+breeds.
+
 As of this run the migrant chooses WHERE, too. Arrival used to be two calls to
 random.randrange, which on a grid with two hunters standing on it dropped a
 returning grazer inside a predator's menace radius about as often as not - and
@@ -900,6 +915,43 @@ GRAZER_TRICKLE_RATE = 0.01      # per-tick chance at that population, gated by o
 # the very drift it exists to correct.
 GRAZER_TRICKLE_FRESH_SHARE = 0.3
 
+# What the range can actually feed - and what a memory is worth when it can't.
+#
+# World.lineage exists so that an extinction is a bottleneck rather than a
+# factory reset: a re-founding migrant is a mutated draw from the stock that
+# bred here. That is the right instinct, and it has one hole in it that the
+# last twelve hundred ticks have been falling through. Lineage records
+# BREEDERS, and for most of this world's history the only bloodline that has
+# bred is the one that ratcheted itself to speed 8 with an eight-tile horizon:
+# 11 energy a tick, a breeding bar of 108, on a grid whose entire income is
+# RESOURCE_SPAWN_RATE * RESOURCE_ENERGY = 18 a tick. That body has a carrying
+# capacity of one and a half animals. So every total extinction - 7269 is the
+# latest of six inside eighty ticks - re-founds this world with another copy of
+# exactly the animal this world cannot afford, which walks in with fifty
+# energy, never reaches a bar it was never going to reach, and dies; and
+# because it never breeds, it never writes anything new into the memory
+# either. The memory was refusing to update on the only evidence that matters.
+#
+# So the re-founding draw is now checked against the world's own income. A
+# remembered body this range could support a population of is drawn from
+# lineage exactly as it always was. One costing more per tick than the income
+# divided among FOUNDING_CAPACITY animals is, with a chance that ramps up with
+# how far past that it sits, not drawn at all - the migrant arrives at the flat
+# species default instead (see _founding_reset_chance). Both species are judged
+# by the same rule, and both species' defaults (grazer 1, hunter 2) sit far
+# inside the affordable band, so a cheap bloodline is untouched to the last
+# point and a hunter lineage that prices itself out gets precisely the same
+# treatment.
+#
+# It is self-clearing like every other gate in this file, because the only
+# thing that can close it is a bloodline cheap enough to breed here, and the
+# moment one does `remember()` records it and lineage draws resume. No energy
+# value moves and no gene is touched. What changes is that this world may no
+# longer be re-founded, over and over, by the one genome its own budget has
+# already refuted.
+FOUNDING_CAPACITY = 3        # animals of a remembered body the income should carry
+FOUNDING_RESET_SPAN = 1.0    # how far past affordable the reset share ramps to certainty
+
 # How rich the prey has to be before a predator makes the journey.
 #
 # Hunter migration has been an unconditional coin flip since the first tick,
@@ -1317,9 +1369,11 @@ class World:
             not any(c.species == "hunter" for c in self.creatures)
             and random.random() < _hunter_migration_chance(self.creatures)
         ):
-            migrant = _spawn_creature(
-                "hunter", lineage=self.lineage.get("hunter"), origin="migrant"
-            )
+            # ...and as of this run that memory is weighed against the world's
+            # own income before it is used: a remembered body this range
+            # cannot feed is increasingly likely to be passed over for an
+            # outsider at the flat species default (see _refounding_migrant).
+            migrant = _refounding_migrant("hunter", self.lineage.get("hunter"))
             # ...and it picks where it comes in, on the strength of its own
             # genome: a hunter arrives within sight of prey rather than on top
             # of it (see _arrival_site).
@@ -1338,9 +1392,7 @@ class World:
             not any(c.species == "grazer" for c in self.creatures)
             and random.random() < _grazer_migration_chance(self.creatures)
         ):
-            migrant = _spawn_creature(
-                "grazer", lineage=self.lineage.get("grazer"), origin="migrant"
-            )
+            migrant = _refounding_migrant("grazer", self.lineage.get("grazer"))
             # A grazer no longer walks blindly into the jaws of whatever wiped
             # its species out: it comes in on ground that is outside the
                 # menace radius of every hunter it can manage, and close to
@@ -2546,6 +2598,62 @@ def _grazer_trickle_chance(creatures: list[Creature]) -> float:
     if not grazers or len(grazers) > GRAZER_TRICKLE_POPULATION:
         return 0.0
     return GRAZER_TRICKLE_RATE * _open_ground(creatures)
+
+
+def _world_income() -> float:
+    """What this world earns per tick, in energy: one plant per spawn roll at
+    what a plant is worth the tick it sprouts.
+
+    It has been this number since the first tick, and RESOURCE_SPAWN_RATE
+    remains the only unconditional constant in the file. Ripening can only ever
+    raise what the ground is actually carrying (see _resource_energy), so this
+    is the conservative floor - the income a population that eats everything it
+    finds genuinely lives on, which is exactly the population being asked about
+    here.
+    """
+    return RESOURCE_SPAWN_RATE * RESOURCE_ENERGY
+
+
+def _founding_reset_chance(candidate: Creature) -> float:
+    """The chance a re-founding migrant is thrown back and arrives at the flat
+    species default instead of as a descendant of the remembered stock.
+
+    Zero for any body this range could carry a population of - the income
+    divided among FOUNDING_CAPACITY animals - so a cheap bloodline is drawn
+    from lineage bit-for-bit as it always was. Past that it ramps with how far
+    beyond affordable the body sits, reaching certainty FOUNDING_RESET_SPAN
+    times the affordable upkeep above it.
+
+    Measured on the candidate that was actually drawn and mutated rather than
+    on an average of the memory, so a lucky cheap draw out of an expensive
+    bloodline keeps its place - which matters, because that draw is the
+    bloodline's own way back.
+    """
+    afford = _world_income() / max(1, FOUNDING_CAPACITY)
+    cost = _upkeep(candidate)
+    if cost <= afford:
+        return 0.0
+    span = max(1e-9, afford * FOUNDING_RESET_SPAN)
+    return min(1.0, (cost - afford) / span)
+
+
+def _refounding_migrant(species: str, lineage: list[dict] | None) -> Creature:
+    """The animal that walks in when a species has died out here entirely: a
+    mutated descendant of the remembered stock, unless that stock has priced
+    itself out of this world (see _founding_reset_chance), in which case an
+    outsider at the flat species default comes instead.
+
+    With no memory of the species at all, or with a memory this world can still
+    afford, this is precisely what it always was - and in that case it consumes
+    exactly the random draws it always did, so an affordable bloodline's
+    arrivals are identical down to the seed. Where the migrant lands is still
+    the caller's decision (see _arrival_site).
+    """
+    migrant = _spawn_creature(species, lineage=lineage, origin="migrant")
+    chance = _founding_reset_chance(migrant) if lineage else 0.0
+    if chance > 0.0 and random.random() < chance:
+        migrant = _spawn_creature(species, origin="migrant")
+    return migrant
 
 
 def _resource_at(resources: list[Resource], x: int, y: int) -> Resource | None:

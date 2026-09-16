@@ -16,6 +16,7 @@
     --carrion: #b9b2a4;
     --carrion-inedible: #7a544c;
     --migrant: #c9b6ff;
+    --stranger: #bfe9ff;
     --brood: #f2a6d0;
     --breeding: #ffc2e4;
     --canopy: rgba(159, 255, 196, 0.42);
@@ -188,6 +189,7 @@
     <span class="swatch"><span class="ring" style="border-color:var(--carrion-inedible);border-style:dotted"></span>hunter remains (crossed out: predators no longer live off their own dead, so this is scenery)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--migrant);border-style:dashed"></span>migrant (just arrived, carries remembered genes)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--migrant);border-style:dotted"></span>the door (pulsing violet, with the absent species' own shape hollow inside it: where the next migrant of a species that has died out here would choose to come in - a grazer wants ground outside every hunter's menace radius and near something to eat, a hunter wants ground about a sense_range from the nearest prey. A real migrant only glances at two dozen tiles, so it lands near here rather than exactly here.)</span>
+    <span class="swatch"><span class="ring" style="border-color:var(--stranger)"></span>the stranger (the pale blue shape inside the door, and WHOSE body is coming through it. A re-founding migrant is a mutated draw from the world's genetic memory - but that memory only records animals that BRED here, and the only grazers that have bred here in a thousand ticks are the speed-8 stock burning eleven a tick against an income of eighteen. That is a carrying capacity of one and a half animals, so every extinction re-founded this world with another copy of the exact animal that had just failed to live in it, and since the copy never bred either, the memory could never update. The remembered body is now weighed against the world's own income: one this range could carry a population of is drawn from lineage exactly as before and the door's shape stays violet, while one that costs more per tick than the income split three ways fades toward this pale blue - an outsider at the flat species default, no camouflage, no nerve, and a body cheap enough to actually breed here. A fully pale shape ringed in dashes is this world about to forget a genome its own budget has already refuted; it goes violet again the moment something affordable breeds.)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--muted)"></span>the latch (a grey bar across a door that is shut: neither species is called in by the calendar any more. A hunter comes only when the grazers standing here are worth the journey - and no single animal, however fat, can open that one. A grazer comes only when enough of the map lies outside every hunter's menace radius to be worth walking into, so a grid covered edge to edge by predators posts nothing more into itself and the besiegers, who cannot eat their own dead, starve the latch back open. Either gate widens, brightens and starts pulsing again as its own condition improves.)</span>
   </div>
   <div id="memory"></div>
@@ -218,6 +220,9 @@ const SENSE_COST = 1;          // must match SENSE_COST - energy/tick per step o
 const MAX_VISION_COST = 4;     // only used to normalise the perception ring's brightness
 const PROVISION_ENERGY = 6;    // must match PROVISION_ENERGY in rules/ecosystem.py - energy a parent hands a newborn per point of provisioning
 const RESOURCE_ENERGY = 30;      // must match RESOURCE_ENERGY - what a plant is worth the tick it sprouts
+const RESOURCE_SPAWN_RATE = 0.6; // must match RESOURCE_SPAWN_RATE - one plant per roll, i.e. this world's entire income
+const FOUNDING_CAPACITY = 3;     // must match FOUNDING_CAPACITY - animals of a remembered body that income should carry
+const FOUNDING_RESET_SPAN = 1.0; // must match FOUNDING_RESET_SPAN - how far past affordable the reset share ramps to certainty
 const RESOURCE_RIPEN_TICKS = 2;  // must match RESOURCE_RIPEN_TICKS - ticks of undisturbed growth per extra energy
 const RESOURCE_MAX_ENERGY = 75;  // must match RESOURCE_MAX_ENERGY - where a plant stops putting on weight
 const SEED_MATURITY = 10;        // must match SEED_MATURITY - ticks a plant must stand before it can sow another
@@ -584,6 +589,32 @@ function parentKeep(c) {
 function breedingBar(c) {
   const repro = REPRODUCE[c.species] || REPRODUCE.grazer;
   return repro.cost + birthWeight(c) - Math.floor(repro.cost / 2) + parentKeep(c);
+}
+
+// Mirror of _founding_reset_chance() in rules/ecosystem.py: how likely the next
+// re-founding migrant of this species is to arrive as an outsider at the flat
+// species default rather than as a descendant of the remembered stock.
+// World.lineage only records BREEDERS, so a bloodline that has ratcheted its own
+// metabolism past what this world earns keeps re-founding as itself, dying of
+// itself, and never writing anything new into the memory - which is the loop the
+// population record has been stuck in. Zero for any body the income could carry
+// FOUNDING_CAPACITY of, so a cheap lineage is drawn from memory exactly as it
+// always was. The sim rolls this against the single genome it actually drew and
+// mutated; the viewer shows it for the remembered stock's average, i.e. what the
+// next arrival will roughly cost to be.
+function foundingResetShare(records, species) {
+  if (!records || !records.length) return 0;
+  const avg = key => records.reduce((s, g) => s + (g[key] || 0), 0) / records.length;
+  const body = {
+    species,
+    speed: Math.round(avg('speed')),
+    sense_range: Math.round(avg('sense_range')),
+    traits: { acuity: avg('acuity') },
+  };
+  const afford = (RESOURCE_SPAWN_RATE * RESOURCE_ENERGY) / Math.max(1, FOUNDING_CAPACITY);
+  const cost = upkeep(body);
+  if (cost <= afford) return 0;
+  return Math.min(1, (cost - afford) / Math.max(1e-9, afford * FOUNDING_RESET_SPAN));
 }
 
 // Mirror of _provision() in rules/ecosystem.py, minus the parent's affordability
@@ -1014,19 +1045,44 @@ function draw(now) {
     ctx.arc(cx, cy, cell * (0.52 + 0.26 * pulse), 0, Math.PI * 2);
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.globalAlpha = (0.45 + 0.30 * pulse) * (open > 0 ? 1 : 0.55);
+    // ...and WHOSE body comes through it. A re-founding migrant is a mutated
+    // draw from the world's genetic memory, and that memory only records
+    // breeders - so a bloodline that has priced itself past this world's own
+    // income keeps re-founding as itself and dying of itself, never writing
+    // anything new back (see _founding_reset_chance in rules/ecosystem.py).
+    // The hollow shape inside the door now cross-fades between the violet of
+    // the remembered stock and the pale blue of an outsider at the flat
+    // species default: solidly violet is an ordinary bottleneck, pale and
+    // ringed in dashes is this world about to forget a body it cannot feed.
+    const stranger = foundingResetShare((world.lineage || {})[species], species);
+    const gate = (0.45 + 0.30 * pulse) * (open > 0 ? 1 : 0.55);
+    const doorShape = (rr) => {
+      ctx.beginPath();
+      if (species === 'hunter') {
+        ctx.moveTo(cx, cy - rr);
+        ctx.lineTo(cx + rr * 0.87, cy + rr * 0.5);
+        ctx.lineTo(cx - rr * 0.87, cy + rr * 0.5);
+        ctx.closePath();
+      } else {
+        ctx.arc(cx, cy, rr * 0.82, 0, Math.PI * 2);
+      }
+      ctx.stroke();
+    };
     ctx.lineWidth = Math.max(0.6, cell * 0.04);
-    ctx.beginPath();
-    if (species === 'hunter') {
-      const r = cell * 0.22;
-      ctx.moveTo(cx, cy - r);
-      ctx.lineTo(cx + r * 0.87, cy + r * 0.5);
-      ctx.lineTo(cx - r * 0.87, cy + r * 0.5);
-      ctx.closePath();
-    } else {
-      ctx.arc(cx, cy, cell * 0.18, 0, Math.PI * 2);
+    ctx.globalAlpha = gate * (1 - stranger);
+    doorShape(cell * 0.22);
+    if (stranger > 0) {
+      ctx.strokeStyle = '#bfe9ff';
+      ctx.globalAlpha = gate * stranger;
+      doorShape(cell * 0.22);
+      ctx.globalAlpha = gate * stranger * 0.7;
+      ctx.lineWidth = Math.max(0.5, cell * 0.03);
+      ctx.setLineDash([cell * 0.06, cell * 0.09]);
+      doorShape(cell * 0.34);
+      ctx.setLineDash([]);
+      ctx.strokeStyle = open > 0 ? '#c9b6ff' : '#5c7266';
+      ctx.lineWidth = Math.max(0.6, cell * 0.04);
     }
-    ctx.stroke();
     // the latch: a grey bar straight across the hunter's door while the prey
     // standing here is worth less than a predator's journey. Nothing at all
     // comes through it until the grazers are worth coming for, and that is the
@@ -1725,6 +1781,19 @@ function draw(now) {
   // tilted and which species it is holding the door open for.
   const preyDraw = grazerDrawShare(arrival.safeFraction);
 
+  // Whether each species' remembered bloodline is still one this world can
+  // actually feed (see _founding_reset_chance in rules/ecosystem.py). 0% means
+  // an extinction re-founds from memory exactly as it always did. A high
+  // percentage means the memory has drifted to a body costing more per tick
+  // than the income split FOUNDING_CAPACITY ways, and the world will mostly
+  // pass it over for an outsider at the flat species default - which is the
+  // only way a bloodline that can no longer breed here gets replaced, since
+  // lineage records breeders and this one has stopped producing any.
+  const founderReset = {
+    grazer: foundingResetShare((world.lineage || {}).grazer, 'grazer'),
+    hunter: foundingResetShare((world.lineage || {}).hunter, 'hunter'),
+  };
+
   const carrionList = world.carrion || [];
   const edibleCount = carrionList.filter(edibleCarrion).length;
   const remainsCount = carrionList.length - edibleCount;
@@ -1801,6 +1870,8 @@ function draw(now) {
       ? (predatorDraw * 100).toFixed(0) + '%' : 'shut'}</b></span>` +
     `<span>prey draw <b>${preyDraw > 0
       ? (preyDraw * 100).toFixed(0) + '%' : 'shut'}</b></span>` +
+    `<span>founder reset <b>grazer ${(founderReset.grazer * 100).toFixed(0)}%` +
+    ` · hunter ${(founderReset.hunter * 100).toFixed(0)}%</b></span>` +
     `<span>carcasses <b>${edibleCount}</b></span>` +
     `<span>carrion larder <b>${carrionLarder}</b></span>` +
     `<span>hunter remains <b>${remainsCount}</b></span>`;
