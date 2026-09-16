@@ -98,6 +98,18 @@ forever, whether or not they ever find anything. An unpriced gene does not
 find an optimum - it only ratchets. The whole of that per-tick bill lives in
 one place, `_upkeep`.
 
+And as of this run one of those prices finally has teeth. MOVE_COST is charged
+per tick, and the trip it is paying for takes ceil(distance / speed) ticks, so
+the speed cancels clean out of the arithmetic: crossing eight tiles has cost
+exactly eight, at every speed this world has ever produced. The charge written
+to stop the speed ratchet has therefore never once touched an animal that was
+walking to its food, which is the entire life of a grazer - and the record
+says so, speed reading 5.67 at tick 3240, 6 at 4147, 7 at 7041 and 8.0 now,
+never coming back down. So speed is given the shape of price vision already
+has (see FREE_SPEED): a gait every body carries for nothing, and a stepped
+surcharge above it that does NOT cancel, so past that gait the cost of
+crossing a tile finally rises with how fast it is crossed.
+
 Bodies are not the only thing a genome decides here. `provisioning` is this
 world's first life-history gene: it sets how much of a parent's own energy
 goes into each newborn instead of into staying alive to breed again (see
@@ -617,6 +629,47 @@ LINEAGE_MEMORY = 8
 # for both species instead of a one-way escalation that only ever favored
 # whichever species last avoided a population crash.
 MOVE_COST = 1
+
+# ...and why that has never once worked.
+#
+# MOVE_COST is charged per tick and per point of speed, so a body burns
+# MOVE_COST * speed every tick it is alive. The trip it is paying for takes
+# ceil(distance / speed) ticks (see _travel_ticks). Multiply the two together
+# and the speed cancels: walking d tiles costs MOVE_COST * d whatever the legs
+# cost, so a speed-8 grazer reaches a plant eight tiles away for precisely what
+# a speed-1 one pays to crawl there. Worse, a far-sighted animal crossed that
+# tile for LESS the faster it went, because its vision bill was divided over
+# fewer ticks of travel. Cost per tile has been flat-to-falling in speed since
+# the tick MOVE_COST was added, which is to say the price that exists
+# specifically to stop the speed ratchet does nothing at all to an animal that
+# is walking to its food - and walking to food is the whole life of a grazer.
+# The record reads 5.67 at tick 3240, 6 at 4147, 7 at 7041 and 8.0 in this
+# run's snapshot: it has never come back down, and at 8 a grazer burns nine a
+# tick on a world whose entire income is eighteen. That is the two-animal
+# carrying capacity every other mechanic in this file has been waiting on.
+#
+# So speed gets the shape of price vision already has (see FREE_SENSE_RANGE):
+# a gait every body carries for nothing extra, and a surcharge above it,
+# stepped rather than sliding so a single point of drift is never instantly
+# fatal. The surcharge is flat in ticks rather than proportional to ground
+# covered, so it survives the multiplication that kills MOVE_COST: past
+# FREE_SPEED the per-tick bill grows faster than the legs do, and a speed-8
+# body pays about a quarter more per tile crossed than a speed-3 one, forever,
+# whether or not the sprint ever finds anything.
+#
+# It creates no energy and removes none from the world - it changes what an
+# expensive body costs to be, which is the only lever this file has ever
+# accepted for a gene that is ratcheting. And it lands twice, because
+# _breeding_bar is quoted in upkeep: a speed-8 grazer's bar goes 92 -> 108
+# while a cheap animal's stays at the 60 it has always been. Both species'
+# defaults (grazer 1, hunter 2) sit inside the free gait and are untouched to
+# the last point, which also means the counterweight is already standing in
+# this world: a trickle migrant arriving at the flat default (see
+# GRAZER_TRICKLE_FRESH_SHARE) now carries a body costing one a tick against a
+# resident bloodline's eleven.
+FREE_SPEED = 3        # gait that costs nothing beyond MOVE_COST itself
+SPEED_COST_STEP = 2   # points of speed above it per extra energy/tick
+SPRINT_COST = 1       # energy/tick per step of sprint
 
 # Energy a hunter pays every tick per FULL point of its acuity gene (see
 # TRAIT_REGISTRY below). Charged with int() truncation, so half-points are
@@ -1844,18 +1897,48 @@ def _vision_cost(creature: Creature) -> int:
     return int(SENSE_COST * (excess // SENSE_COST_STEP))
 
 
+def _sprint_cost(creature: Creature) -> int:
+    """The surcharge this body pays every tick for the gait it keeps above
+    FREE_SPEED: the part of the price of speed that does NOT cancel against
+    arriving sooner.
+
+    MOVE_COST is charged per tick and per point of speed, and a trip of d tiles
+    takes ceil(d / speed) ticks (see _travel_ticks), so the two multiply out to
+    MOVE_COST * d at every speed there is. An animal here has always crossed a
+    tile for the same price whether it walked or sprinted - and a far-sighted
+    one crossed it for less the faster it went, since its vision bill was
+    divided over fewer ticks of travel. That is how speed ratcheted from 5.67 to
+    8.0 across this world's record with a per-tick charge already sitting on it.
+
+    This charge is flat in ticks rather than proportional to the ground covered,
+    so it survives that same multiplication: at speed 3 a tile costs 1.0, at
+    speed 8 it costs 1.25, forever. Stepped every SPEED_COST_STEP points and
+    truncated exactly as _vision_cost is, so a single point of drift is never
+    immediately expensive and the bill only really lands on a lineage that has
+    committed to running everywhere. It is charged standing still as well as
+    running, because a body that can sprint costs that much to keep.
+    """
+    excess = creature.speed - FREE_SPEED
+    if excess <= 0:
+        return 0
+    return int(SPRINT_COST * (excess // SPEED_COST_STEP))
+
+
 def _upkeep(creature: Creature) -> int:
     """Everything this creature pays every single tick simply for being the
-    animal it is: its speed (MOVE_COST), its horizon (see _vision_cost) and,
-    for a hunter, its acuity (ACUITY_COST). A grazer's inherited acuity is
-    inert and is not billed, exactly as before.
+    animal it is: its speed (MOVE_COST), the gait it keeps above the free one
+    (see _sprint_cost), its horizon (see _vision_cost) and, for a hunter, its
+    acuity (ACUITY_COST). A grazer's inherited acuity is inert and is not
+    billed, exactly as before.
 
     This is the precise charge step() applies. It is factored out here because
     reproduction now reads the same number - the cost of running a body and
     the cost of starting one must not be able to drift apart (see
-    _birth_weight).
+    _birth_weight) - and so does the worth of a plant across a distance (see
+    _forage_net) and the length of a fleeing animal's nerve (see
+    _runway_ticks). Everything this world charges for a body is one number.
     """
-    cost = MOVE_COST * creature.speed + _vision_cost(creature)
+    cost = MOVE_COST * creature.speed + _sprint_cost(creature) + _vision_cost(creature)
     if creature.species == "hunter":
         cost += int(ACUITY_COST * creature.trait("acuity"))
     return cost

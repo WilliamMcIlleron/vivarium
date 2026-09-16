@@ -170,6 +170,7 @@
     <span class="swatch"><span class="ring" style="border-color:var(--vision);border-style:dashed"></span>perception (how far this animal can actually see - free out to 6 tiles, then one spoke on the ring for every energy/tick it burns keeping the extra horizon)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--creature-high)"></span>flight distance (the ground a grazer keeps between itself and one particular hunter: a few ticks of warning times that hunter's speed, so it is tight around a slow predator and enormous around a fast one - a ghost-faint ring means nothing is in sight and this is what it would keep)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--resource);border-style:dashed"></span>too hungry to run (the amber dashed ring, and it is a ring that is collapsing: a grazer may no longer demand more clearance from a predator than half the life it has left. A hunger clause has been in the rules since tick 1728 and never once fired, because it multiplied a gene every grazer here carries at 0.0 - so the starving animal held exactly the same line as the fat one and died holding it, which is what nearly every carcass on this grid actually is. A fed grazer's ring is unchanged to the last pixel; as one burns down its flight ring shrinks in around its own body until it is standing on the plant with a hunter in plain sight. It is the predators' own method turned back on them - they clear ground rather than catch anything, and the hungrier the herd they make, the less of that ground the herd honours - and it is cheap to grant, because a grazer caught standing its ground is worth 8 to the hunter, the same as its corpse.)</span>
+    <span class="swatch"><span class="bar" style="background:#ffeab0"></span>the burn (the pale ember streak a fast animal drags behind it, with one ember ON the body per energy/tick it is paying for its gait alone. Speed has been charged for every tick since MOVE_COST was added, and that charge has never once been able to hold it down, because it cancels exactly against arriving sooner: a trip of eight tiles costs eight whether it is crossed at speed 1 or speed 8, and a far-sighted animal crossed it for LESS the faster it ran. Grazer speed has gone 5.7, 6, 7, 8 across this world's whole record without ever coming back down, and at 8 a grazer burns nine a tick in a world whose income is eighteen - which is the two-animal ceiling everything else here keeps hitting. Above a free gait of three a body now pays a surcharge that does not cancel, so cost per tile finally rises with speed, and the embers are paid standing still as well as running. Nothing is created: an expensive body simply costs more to be, and its breeding bar, quoted in its own upkeep, rises with it.)</span>
     <span class="swatch"><span class="bar" style="background:var(--creature-high)"></span>herd bond (linked grazers are harder for a hunter to single out - brighter = deeper cover)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--creature-high);border-style:dotted"></span>gregariousness (how strongly a grazer walks to company instead of food)</span>
     <span class="swatch"><span class="arc"></span>breeding bar (the rose collar right on the body: a newborn is sent out with four ticks of the body it inherits, and the parent has to save up for that first - so a WIDE collar is an expensive animal with a high bar to clear, and a FULL one is an animal that will breed this tick. As of this run the collar carries a second mark: a short radial NOTCH at the energy the parent will be left holding afterwards. That was a flat 20 for every grazer that has ever lived here, which is twenty ticks of life for a speed-1 body and two and a half for the speed-7 ones this world actually breeds - so reproduction was one animal splitting into two that were both a few ticks from starving, which is why this grid keeps showing two or three grazers and then none. A parent must now keep four ticks of its own upkeep as well, floored at that old 20, and the shortfall is added to the bar. The arc from the notch round to the top of the ring is all a birth actually spends; everything below the notch is life the animal is required to still be carrying when it is done. Nothing changes for a cheap body, and nothing about the energy a birth burns changes for any body.)</span>
@@ -233,6 +234,10 @@ const HUNTER_MIGRATION_FULL = 180; // must match HUNTER_MIGRATION_FULL - prey wo
 const GRAZER_MIGRATION_OPEN = 0.15; // must match GRAZER_MIGRATION_OPEN - share of the grid free of menace below which no grazer comes at all
 const GRAZER_MIGRATION_FULL = 0.55; // must match GRAZER_MIGRATION_FULL - share at which they come at the full old rate
 const MOVE_COST = 1;           // must match MOVE_COST in rules/ecosystem.py - energy/tick per point of speed
+const FREE_SPEED = 3;          // must match FREE_SPEED - gait that costs nothing beyond MOVE_COST
+const SPEED_COST_STEP = 2;     // must match SPEED_COST_STEP - points of speed above it per extra energy/tick
+const SPRINT_COST = 1;         // must match SPRINT_COST - energy/tick per step of sprint
+const MAX_SPRINT_COST = 4;     // only used to normalise how hot the burn is drawn
 const ACUITY_COST = 1;         // must match ACUITY_COST - energy/tick per full point of a hunter's acuity
 const BIRTH_RUNWAY_TICKS = 4;  // must match BIRTH_RUNWAY_TICKS - ticks of its own upkeep a newborn starts with
 const PARENT_RUNWAY_TICKS = 4; // must match PARENT_RUNWAY_TICKS - ticks of its own upkeep a parent must still be holding once it has bred
@@ -538,8 +543,21 @@ function visionCost(c) {
 // flat cost/2), and the parent has to have saved that up BEFORE it may breed.
 // So a cheap animal's bar is the species threshold exactly as it always was,
 // and an expensive one's is higher by however much its child costs to launch.
+// Mirror of _sprint_cost() in rules/ecosystem.py: the surcharge a body pays
+// every tick for the gait it keeps above FREE_SPEED. MOVE_COST alone could
+// never price speed, because a per-tick charge is cancelled exactly by
+// arriving sooner - crossing d tiles has cost MOVE_COST * d at every speed
+// this world has ever produced, and less than that for a far-sighted animal.
+// This is the part that does not cancel, so cost per tile finally rises with
+// speed: 1.0 at speed 3, 1.25 at speed 8.
+function sprintCost(c) {
+  const excess = (c.speed || 0) - FREE_SPEED;
+  if (excess <= 0) return 0;
+  return SPRINT_COST * Math.floor(excess / SPEED_COST_STEP);
+}
+
 function upkeep(c) {
-  let cost = MOVE_COST * (c.speed || 0) + visionCost(c);
+  let cost = MOVE_COST * (c.speed || 0) + sprintCost(c) + visionCost(c);
   if (c.species === 'hunter') {
     cost += Math.floor(ACUITY_COST * ((c.traits && c.traits.acuity) || 0));
   }
@@ -744,16 +762,22 @@ function interpolatedCreatures(now) {
     const prev = prevById.get(c.id);
     if (!prev) {
       // newborn - no previous position to glide from, fade in instead
-      return { ...c, drawX: c.x, drawY: c.y, alpha: t };
+      return { ...c, drawX: c.x, drawY: c.y, alpha: t, prevX: null, prevY: null };
     }
     const dx = c.x - prev.x;
     const dy = c.y - prev.y;
     if (Math.abs(dx) > GRID / 2 || Math.abs(dy) > GRID / 2) {
       // wrapped around the grid edge - gliding "the long way" across the
       // whole map would look wrong, so just cut to the new position.
-      return { ...c, drawX: c.x, drawY: c.y, alpha: 1 };
+      return { ...c, drawX: c.x, drawY: c.y, alpha: 1, prevX: null, prevY: null };
     }
-    return { ...c, drawX: prev.x + dx * t, drawY: prev.y + dy * t, alpha: 1 };
+    // prevX/prevY are kept so the burn streak below can be drawn along the
+    // ground this animal actually covered this tick, rather than guessed from
+    // its speed.
+    return {
+      ...c, drawX: prev.x + dx * t, drawY: prev.y + dy * t, alpha: 1,
+      prevX: prev.x, prevY: prev.y,
+    };
   });
 }
 
@@ -1259,6 +1283,52 @@ function draw(now) {
     ctx.globalAlpha = 1;
   }
 
+  // the burn: what a fast body pays every tick for its gait alone, over and
+  // above the flat MOVE_COST that has been charged since tick 1147 (see
+  // _sprint_cost in rules/ecosystem.py). That old charge could never hold
+  // speed down, because it is cancelled exactly by arriving sooner - a trip of
+  // d tiles costs MOVE_COST * d at any speed, and less than that for a
+  // far-sighted animal, whose vision bill is divided over fewer ticks of
+  // travel. So speed ratcheted 5.67 -> 6 -> 7 -> 8.0 across this world's whole
+  // record with a price already sitting on it, and at 8 a grazer burns nine a
+  // tick against a world income of eighteen.
+  //
+  // Drawn twice, because the surcharge is paid twice over: as a pale ember
+  // streak along the ground this animal actually covered this tick - the
+  // faster and more expensive it is, the brighter and longer the streak - and
+  // as one ember on its own body per energy/tick of the charge, which it pays
+  // standing still as well as running. A body inside the free gait has neither
+  // and reads exactly as it always did.
+  for (const c of creatures) {
+    const burn = sprintCost(c);
+    if (burn <= 0) continue;
+    const heat = Math.max(0, Math.min(1, burn / MAX_SPRINT_COST));
+    const cx = c.drawX * cell + cell / 2;
+    const cy = c.drawY * cell + cell / 2;
+    const moved = c.prevX !== null && c.prevX !== undefined;
+    if (moved && (c.prevX !== c.x || c.prevY !== c.y)) {
+      ctx.globalAlpha = c.alpha * (0.10 + 0.32 * heat);
+      ctx.strokeStyle = '#ffeab0';
+      ctx.lineWidth = Math.max(0.6, cell * (0.03 + 0.06 * heat));
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(c.prevX * cell + cell / 2, c.prevY * cell + cell / 2);
+      ctx.lineTo(cx, cy);
+      ctx.stroke();
+      ctx.lineCap = 'butt';
+    }
+    ctx.globalAlpha = c.alpha * (0.35 + 0.45 * heat);
+    ctx.fillStyle = '#ffeab0';
+    for (let i = 0; i < burn; i++) {
+      const a = -Math.PI / 2 + (i * 2 * Math.PI) / burn + 0.5;
+      ctx.beginPath();
+      ctx.arc(cx + Math.cos(a) * cell * 0.34, cy + Math.sin(a) * cell * 0.34,
+              Math.max(0.8, cell * 0.045), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
   // migrants: a creature that walked in from outside after its species had
   // died out here. It is NOT a blank default any more - it descends from the
   // world's remembered stock (see bloodline() and World.lineage), so an
@@ -1536,6 +1606,20 @@ function draw(now) {
   // with it, so this is now the only thing a far-sighted lineage pays.
   const visionUpkeep = creatures.reduce((sum, c) => sum + visionCost(c), 0);
 
+  // ...and the other half of the same bill, new this run: what the population
+  // is spending per tick purely on its gait above the free one (see
+  // _sprint_cost in rules/ecosystem.py). Read it beside "avg speed", which is
+  // the number this change exists to move: a per-tick charge on speed has
+  // existed here since tick 1147 and cancelled itself against arriving sooner,
+  // so speed has only ever gone up. If avg speed starts coming down over the
+  // next few hundred ticks, this is why - and the world's carrying capacity is
+  // rising with it, since capacity is income over upkeep and only the
+  // denominator is allowed to move.
+  const gaitUpkeep = creatures.reduce((sum, c) => sum + sprintCost(c), 0);
+  const speedAvg = creatures.length
+    ? creatures.reduce((sum, c) => sum + (c.speed || 0), 0) / creatures.length
+    : 0;
+
   // The average head start a newborn is being handed here on top of the
   // runway (see PROVISION_ENERGY). Still 0 in both species at tick 4209: a
   // gene needs a population to be sampled in.
@@ -1701,6 +1785,8 @@ function draw(now) {
     `<span>flight warning <b>${warnAvg.toFixed(1)}</b> ticks</span>` +
     `<span>too hungry to run <b>${starvedCount}</b></span>` +
     `<span>vision upkeep <b>${visionUpkeep}</b>/tick</span>` +
+    `<span>gait upkeep <b>${gaitUpkeep}</b>/tick</span>` +
+    `<span>avg speed <b>${speedAvg.toFixed(1)}</b></span>` +
     `<span>breeding bar <b>${barAvg.toFixed(0)}</b></span>` +
     `<span>birth weight <b>${weightAvg.toFixed(0)}</b></span>` +
     `<span>parent keep <b>${keepAvg.toFixed(0)}</b></span>` +
