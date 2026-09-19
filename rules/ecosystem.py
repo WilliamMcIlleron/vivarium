@@ -218,6 +218,23 @@ over for an outsider at the flat species default (see _founding_reset_chance).
 The gate closes itself the instant a bloodline cheap enough to breed here
 breeds.
 
+And as of this run the outsider it is passed over FOR is genuinely an
+outsider. `_spawn_creature` mutates the genome it builds only when it is
+handed a lineage; called without one it returns a constant. So every "fresh"
+genome this world has ever produced - the trickle migrant that deliberately
+bypasses memory while the species is alive and thin, the re-founding migrant
+thrown back by the gate above - has been bit-for-bit the same animal: speed 1,
+sense_range 5, and every one of the five registry traits at exactly 0.0. That
+is precisely what this run's genome snapshot reads across all four grazers
+alive, on all seven genes at once, which is not something drift does. Two
+mechanisms written to refresh a gene pool had become the largest single source
+of uniformity in it. A stranger now arrives having lived somewhere else (see
+_wild_creature): the same cheap species default, walked a few rounds of the
+ordinary mutation this file already defines, so two arrivals are no longer the
+same animal and neither of them is the founding stock. No energy moves and no
+new rule is added - selection is simply given something to select between,
+which is the one thing it has never had here.
+
 As of this run the migrant chooses WHERE, too. Arrival used to be two calls to
 random.randrange, which on a grid with two hunters standing on it dropped a
 returning grazer inside a predator's menace radius about as often as not - and
@@ -935,6 +952,48 @@ GRAZER_TRICKLE_RATE = 0.01      # per-tick chance at that population, gated by o
 # the very drift it exists to correct.
 GRAZER_TRICKLE_FRESH_SHARE = 0.3
 
+# What an outsider actually is.
+#
+# The genome snapshot at tick 9025 reads speed 1.0, sense_range 5.0,
+# camouflage 0.0, acuity 0.0, gregariousness 0.0, nerve 0.0 and provisioning
+# 0.0 across all four grazers alive. That is not drift and it is not
+# selection - it is the flat species default, to the last decimal place, on
+# every gene this world has, in every animal standing in it. And the reason is
+# one line in _spawn_creature: it mutates the genome it builds ONLY when it is
+# handed a lineage. Called without one it returns a constant.
+#
+# So every "fresh outsider" this world has ever produced is the identical
+# animal, and the last two runs quietly made that animal the commonest genome
+# on the grid. GRAZER_TRICKLE_FRESH_SHARE bypasses lineage while the species
+# is alive and thin; _founding_reset_chance bypasses it on re-founding when
+# the remembered body has priced itself out; both hand back the same zero
+# vector. Both were written to refresh a gene pool and both have been the
+# largest single source of uniformity in it. A cure that administers the exact
+# same dose every time is not variation - it is a second kind of drift, and it
+# is the stronger one, because it fires on purpose.
+#
+# An outsider therefore still starts at the species default - the cheap,
+# affordable body the founder-reset gate exists to reach for - and then walks
+# WILD_DRAW_ROUNDS rounds of the ordinary mutation this world already uses
+# (see _wild_creature). At MUTATION_RATE 0.1 that touches about half of the
+# seven genes, so a stranger differs from the blank in roughly three of them:
+# enough to be a different animal, nowhere near enough to be a different
+# species.
+#
+# The asymmetry costs nothing and is the point. Every gene here sits on its
+# own floor by default - speed at its minimum of 1, every registry trait at
+# 0.0 - so a symmetric walk from there is clamped going down and open going
+# up, and an outsider is on average a slightly richer animal than the blank.
+# What decides whether that is worth having is the price structure the last
+# three runs built: _upkeep charges for every point of it every tick,
+# _breeding_bar charges again at the bottleneck, and a stranger that arrives
+# overpaying for a body this range cannot feed dies exactly as the speed-8
+# bloodline did. Six rounds from a speed-1, sense-5 body lands essentially
+# always inside the income this world earns divided FOUNDING_CAPACITY ways,
+# so this cannot smuggle an unaffordable animal through the very gate that
+# exists to keep one out.
+WILD_DRAW_ROUNDS = 6
+
 # What the range can actually feed - and what a memory is worth when it can't.
 #
 # World.lineage exists so that an extinction is a bottleneck rather than a
@@ -1431,11 +1490,19 @@ class World:
             # the flat species default rather than a lineage memory that may
             # itself have already drifted to the same corner it is meant to
             # correct (see GRAZER_TRICKLE_FRESH_SHARE).
+            # ...and as of this run the bypass leads somewhere other than a
+            # constant: a migrant that skips the memory arrives as a genuine
+            # stranger rather than as the same zero vector every time (see
+            # WILD_DRAW_ROUNDS).
             fresh = random.random() < GRAZER_TRICKLE_FRESH_SHARE
-            migrant = _spawn_creature(
-                "grazer",
-                lineage=None if fresh else self.lineage.get("grazer"),
-                origin="migrant",
+            migrant = (
+                _wild_creature("grazer", origin="migrant")
+                if fresh
+                else _spawn_creature(
+                    "grazer",
+                    lineage=self.lineage.get("grazer"),
+                    origin="migrant",
+                )
             )
             migrant.x, migrant.y = _arrival_site(
                 migrant, self.creatures, self.resources
@@ -1961,6 +2028,32 @@ def _spawn_creature(
         traits=traits,
         origin=origin,
     )
+
+
+def _wild_creature(species: str, origin: str = "born") -> Creature:
+    """An animal out of this world's own history rather than out of its memory:
+    the flat species default, walked WILD_DRAW_ROUNDS rounds of ordinary
+    mutation away from itself (see WILD_DRAW_ROUNDS for the whole argument).
+
+    It reuses _mutated_genes rather than rolling a distribution of its own, for
+    exactly the reason migrant arrival does - there must not be a second,
+    divergent copy of what a mutation means in this world - so a wild draw is
+    precisely "this species, a few generations of somewhere else" and nothing
+    more exotic than that. Position and starting energy are untouched, so where
+    a stranger comes in is still the caller's decision (see _arrival_site).
+
+    The founding population and every other direct _spawn_creature caller are
+    deliberately left alone: World.new() still lays down the same flat stock it
+    always did, and a lineage draw is not a stranger at all.
+    """
+    migrant = _spawn_creature(species, origin=origin)
+    speed, sense_range, traits = migrant.speed, migrant.sense_range, migrant.traits
+    for _ in range(WILD_DRAW_ROUNDS):
+        speed, sense_range, traits = _mutated_genes(speed, sense_range, traits)
+    migrant.speed = speed
+    migrant.sense_range = sense_range
+    migrant.traits = traits
+    return migrant
 
 
 def _vision_cost(creature: Creature) -> int:
@@ -2773,7 +2866,10 @@ def _refounding_migrant(species: str, lineage: list[dict] | None) -> Creature:
     migrant = _spawn_creature(species, lineage=lineage, origin="migrant")
     chance = _founding_reset_chance(migrant) if lineage else 0.0
     if chance > 0.0 and random.random() < chance:
-        migrant = _spawn_creature(species, origin="migrant")
+        # ...and the outsider it is passed over for is an outsider now, not a
+        # third copy of the founding stock (see WILD_DRAW_ROUNDS): a body still
+        # cheap enough for this range to carry, but not the same one twice.
+        migrant = _wild_creature(species, origin="migrant")
     return migrant
 
 

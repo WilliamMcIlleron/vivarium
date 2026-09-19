@@ -189,6 +189,7 @@
     <span class="swatch"><span class="ring" style="border-color:var(--carrion)"></span>carcass (a grazer's body - the only carrion a hunter can eat; fades as it rots, and as of this run its SIZE and its orange quarry rim are what a scavenger would actually bank for it. A carcass used to be a flat 30 whatever condition the animal fell in, so a grazer the hunters had starved was worth four times more to them dead than alive; a body is worth the body now, which makes a starveling's corpse a bare speck and an old animal that died fat a genuine windfall.)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--carrion-inedible);border-style:dotted"></span>hunter remains (crossed out: predators no longer live off their own dead, so this is scenery)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--migrant);border-style:dashed"></span>migrant (just arrived, carries remembered genes)</span>
+    <span class="swatch"><span class="ring" style="border-color:var(--stranger);border-style:dotted"></span>outside blood (the short pale-blue spokes standing off a body, one for every gene this animal carries somewhere other than the flat species default. The world's genome builder mutates only when it is handed a lineage, so every "fresh" migrant this world had ever produced - the trickle that bypasses memory while the species is alive and thin, the re-founding migrant thrown back when the remembered body has priced itself out - arrived as bit-for-bit the same animal: speed 1, sense 5, every trait exactly 0.0. That is what the genome snapshot read across all four grazers alive at tick 9025, on all seven genes at once, which is not something drift does. Two mechanisms written to refresh a gene pool were the largest single source of uniformity in it. A stranger now arrives having lived somewhere else - the same cheap default, walked a few rounds of this world's own mutation - so a bare body is the blank this place keeps re-founding itself with, and a crown of spokes is something new for selection to choose between. Because every gene here sits on its own floor by default, that walk is clamped going down and open going up: a stranger is a slightly richer animal than the blank, and the per-tick bill and the breeding bar are what decide whether it was worth being.)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--migrant);border-style:dotted"></span>the door (pulsing violet, with the absent species' own shape hollow inside it: where the next migrant of a species that has died out here would choose to come in - a grazer wants ground outside every hunter's menace radius and near something to eat, a hunter wants ground about a sense_range from the nearest prey. A real migrant only glances at two dozen tiles, so it lands near here rather than exactly here.)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--stranger)"></span>the stranger (the pale blue shape inside the door, and WHOSE body is coming through it. A re-founding migrant is a mutated draw from the world's genetic memory - but that memory only records animals that BRED here, and the only grazers that have bred here in a thousand ticks are the speed-8 stock burning eleven a tick against an income of eighteen. That is a carrying capacity of one and a half animals, so every extinction re-founded this world with another copy of the exact animal that had just failed to live in it, and since the copy never bred either, the memory could never update. The remembered body is now weighed against the world's own income: one this range could carry a population of is drawn from lineage exactly as before and the door's shape stays violet, while one that costs more per tick than the income split three ways fades toward this pale blue - an outsider at the flat species default, no camouflage, no nerve, and a body cheap enough to actually breed here. A fully pale shape ringed in dashes is this world about to forget a genome its own budget has already refuted; it goes violet again the moment something affordable breeds.)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--muted)"></span>the latch (a grey bar across a door that is shut: neither species is called in by the calendar any more. A hunter comes only when the grazers standing here are worth the journey - and no single animal, however fat, can open that one. A grazer comes only when enough of the map lies outside every hunter's menace radius to be worth walking into, so a grid covered edge to edge by predators posts nothing more into itself and the besiegers, who cannot eat their own dead, starve the latch back open. Either gate widens, brightens and starts pulsing again as its own condition improves.)</span>
@@ -205,6 +206,15 @@ const CARRION_ENERGY = 30;     // must match CARRION_ENERGY - what a body whose 
 const SCAVENGEABLE_CARRION = ['grazer']; // must match SCAVENGEABLE_CARRION - whose bodies are actually food
 const MIGRANT_MARK_TICKS = 40; // how long a migrant keeps its arrival halo - viewer-only, nothing in the sim reads it
 const MAX_TRAIT = 3;           // upper bound of the genome traits in TRAIT_REGISTRY - used only to normalise them for drawing
+// must match _spawn_creature() in rules/ecosystem.py: the flat species default,
+// i.e. the exact genome every "fresh" migrant used to arrive carrying, every
+// single time, because _spawn_creature mutates only when handed a lineage.
+const SPECIES_DEFAULT = {
+  grazer: { speed: 1, sense_range: 5 },
+  hunter: { speed: 2, sense_range: 5 },
+};
+const TRAIT_NAMES = ['camouflage', 'acuity', 'gregariousness', 'nerve', 'provisioning'];
+const GENOME_SIZE = 2 + TRAIT_NAMES.length;  // genes an animal can differ from the blank in
 const HERD_RADIUS = 2;         // must match HERD_RADIUS in rules/ecosystem.py - who counts as standing together
 const HERD_COVER_MAX = 2;      // must match HERD_COVER_MAX - only used to normalise the bond brightness
 const NERVE_HUNGER_LEVEL = 25; // must match NERVE_HUNGER_LEVEL in rules/ecosystem.py
@@ -693,6 +703,26 @@ function foundingResetShare(records, species) {
 function broodStake(c) {
   const invest = (c.traits && c.traits.provisioning) || 0;
   return invest <= 0 ? 0 : Math.floor(PROVISION_ENERGY * invest);
+}
+
+// How many of this animal's seven genes stand somewhere other than the flat
+// species default (see WILD_DRAW_ROUNDS in rules/ecosystem.py). Until this run
+// every migrant that deliberately bypassed the world's memory - the trickle's
+// fresh share, the re-founding reset - arrived as the identical zero vector,
+// which is why the genome snapshot at tick 9025 read default on all seven genes
+// in all four grazers at once. An outsider is drawn a few rounds of ordinary
+// mutation away from the default now, so this is a direct readout of how much
+// of the standing population is anything other than the blank this world keeps
+// re-founding itself with. 0 everywhere is exactly the picture before it.
+function offDefault(c) {
+  const base = SPECIES_DEFAULT[c.species] || SPECIES_DEFAULT.grazer;
+  let off = 0;
+  if ((c.speed || 0) !== base.speed) off++;
+  if ((c.sense_range || 0) !== base.sense_range) off++;
+  for (const t of TRAIT_NAMES) {
+    if (((c.traits && c.traits[t]) || 0) !== 0) off++;
+  }
+  return off;
 }
 
 function lerpColor(a, b, t) {
@@ -1513,6 +1543,40 @@ function draw(now) {
     ctx.globalAlpha = 1;
   }
 
+  // outside blood: one short pale-blue spoke standing off the body for every
+  // gene this animal carries somewhere other than the flat species default
+  // (see _wild_creature in rules/ecosystem.py). Pale blue because it is the
+  // stranger's colour - the hue the door already wears when this world is
+  // about to pass its own memory over for an outsider - and it is on the
+  // animals now rather than only on the gate they came through.
+  //
+  // A bare, unmarked body is the blank: speed 1, sense 5, every trait exactly
+  // 0.0. That was every "fresh" migrant this world had ever produced, because
+  // _spawn_creature mutates only when it is handed a lineage, and at tick 9025
+  // it was every single grazer standing on the grid - seven genes, four
+  // animals, all of them at the default at once. A crown of spokes is genetic
+  // variation: the raw material every prey-side mechanic in this world has
+  // been waiting on, and the thing the two "refresh the gene pool" mechanics
+  // were quietly removing rather than adding.
+  for (const c of creatures) {
+    const off = offDefault(c);
+    if (off <= 0) continue;
+    const wild = Math.min(1, off / GENOME_SIZE);
+    const cx = c.drawX * cell + cell / 2;
+    const cy = c.drawY * cell + cell / 2;
+    ctx.strokeStyle = '#bfe9ff';
+    ctx.lineWidth = Math.max(0.6, cell * (0.026 + 0.022 * wild));
+    ctx.globalAlpha = c.alpha * (0.34 + 0.42 * wild);
+    for (let i = 0; i < off; i++) {
+      const a = -Math.PI / 2 + (i * 2 * Math.PI) / off + 0.4;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(a) * cell * 0.20, cy + Math.sin(a) * cell * 0.20);
+      ctx.lineTo(cx + Math.cos(a) * cell * 0.33, cy + Math.sin(a) * cell * 0.33);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
   // acuity: the hunter's half of the detection arms race (see TRAIT_REGISTRY
   // in rules/ecosystem.py). It widens a hunter's effective sense_range when
   // it's looking for live prey - cancelling grazer camouflage, herd cover and
@@ -1780,6 +1844,17 @@ function draw(now) {
     ? creatures.reduce((sum, c) => sum + (c.speed || 0), 0) / creatures.length
     : 0;
 
+  // How much of this world's standing genome is anything other than the blank
+  // species default (see offDefault above and WILD_DRAW_ROUNDS in
+  // rules/ecosystem.py): every gene, across every animal alive, standing
+  // somewhere else. At tick 9025 this read 0 out of 28 - four grazers, seven
+  // genes each, every one at exactly the default - because the two mechanisms
+  // meant to refresh the gene pool were both handing out the identical zero
+  // vector. It is the one number that says whether there is anything on this
+  // grid for selection to act on at all, and it should start climbing the
+  // first time a stranger comes through either door and breeds.
+  const wildGenes = creatures.reduce((sum, c) => sum + offDefault(c), 0);
+
   // The average head start a newborn is being handed here on top of the
   // runway (see PROVISION_ENERGY). Still 0 in both species at tick 4209: a
   // gene needs a population to be sampled in.
@@ -1970,6 +2045,7 @@ function draw(now) {
     `<span>vision upkeep <b>${visionUpkeep}</b>/tick</span>` +
     `<span>gait upkeep <b>${gaitUpkeep}</b>/tick</span>` +
     `<span>avg speed <b>${speedAvg.toFixed(1)}</b></span>` +
+    `<span>outside blood <b>${wildGenes}</b>/${creatures.length * GENOME_SIZE} genes</span>` +
     `<span>breeding bar <b>${barAvg.toFixed(0)}</b></span>` +
     `<span>birth weight <b>${weightAvg.toFixed(0)}</b></span>` +
     `<span>parent keep <b>${keepAvg.toFixed(0)}</b></span>` +

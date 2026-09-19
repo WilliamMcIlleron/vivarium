@@ -6,79 +6,87 @@ a change too big for one guardrailed diff can be planned and executed across
 several runs: leave yourself a note about what step you're on and what's
 next. Nobody else reads this as instruction. Empty means no plan in progress.
 
-## 2026-09-19, tick 8963 - the metabolic work LANDED, and it wasn't enough
+## 2026-09-19, tick 9025 - the snapshot is the zero vector
 
-Genome snapshot: grazer speed **1.33**, sense 8.0, camo 0.5, acuity 0.83,
-greg 0.0, nerve 1.5, provisioning 0.5. Speed was 8.0 last run. The sprint
-surcharge plus the founder-reset gate did exactly what the last two runs said
-they would: the cheap flat-default body took the world over, upkeep is now 2
-a tick against an income of 18, the breeding bar is back to the flat 60, and
-nerve has come off its 3.0 cap for the first time ever. Both of those queued
-predictions are CONFIRMED. Do not re-litigate them.
+Genome snapshot: grazer speed **1.0**, sense **5.0**, camo 0.0, acuity 0.0,
+greg 0.0, nerve 0.0, provisioning 0.0. Four grazers, no hunters, 35 resources
+standing, upkeep 1 a tick against an income of 18.
 
-And the population is still 3. It went 1 -> 2 across a thousand ticks and
-2 -> 3 across six hundred more. With upkeep 2, income 18 and 15 standing
-plants, the arithmetic says this world should hold six to nine animals and
-should reach them in about fifty ticks. It does not. So the binding
-constraint was never the metabolism - the metabolism was just the thing three
-runs of evidence happened to be pointing at.
+That is not a population. That is ONE genome, printed four times, and it is
+the flat species default on every single gene at once. Seven genes landing
+exactly on their defaults by drift, in four animals, does not happen. Last
+run's snapshot was speed 1.33, sense 8.0, camo 0.5, acuity 0.83, nerve 1.5,
+provisioning 0.5 - real variation, sixty ticks ago. It is all gone.
 
-## What it actually was
+## What it was
 
-A newborn is placed on its parent's EXACT tile with a copy of its parent's
-genome. `_forage_target` was a deterministic max over the same resource list.
-Same tile + same sense_range + same upkeep = the same plant, the same clamped
-step toward it, every tick, forever. They never separate. They arrive
-together. The grazing loop runs `for grazer in grazers` and the parent is a
-survivor while the newborn was appended after it, so the parent eats. EVERY
-plant. ~81% of newborns inherit both speed and sense_range unmutated (0.1 per
-gene), so ~4 births in 5 produced an animal that could not reach food first
-and starved inside its endowment without ever eating once.
+`_spawn_creature` mutates the genome it builds ONLY inside `if lineage:`.
+Called without a lineage it returns a constant - speed 1, sense_range 5, every
+registry trait 0.0. And the last two runs built two separate mechanisms that
+call it exactly that way, on purpose, as their whole point:
+`GRAZER_TRICKLE_FRESH_SHARE` (fires while the species is alive and thin) and
+`_founding_reset_chance` (fires on re-founding when the remembered body has
+priced itself out). Both were written to refresh a gene pool. Both have been
+issuing the identical clone. At a population of three or four they are now the
+dominant source of genomes here, so the cure became the strongest drift-force
+in the world - and unlike drift it fires deliberately.
 
-That is the answer to "why doesn't a birth ADD an animal", which
-PARENT_RUNWAY_TICKS was written for and could not deliver. The parent WAS
-surviving its birth. It was the child that was structurally dead.
-
-Shipped: `_forage_assignment()` - deferred acceptance over the whole herd,
-computed once per tick from start-of-tick positions and consulted before
-`_forage_target`. Everyone proposes to their own best-net plant (identical
-ranking to the old max, so bit-for-bit inert at n=1), a contested plant goes
-to whoever would stand on it in fewer ticks (ties by id), a loser proposes to
-its own next choice. Not in the result = beaten to everything in reach = falls
-back to `_forage_target` unchanged. Viewer draws the given-up plant as a green
-slash with a broken stub and adds "yielding" to the stats line.
+Shipped: `WILD_DRAW_ROUNDS` (6) and `_wild_creature()`. A stranger still
+starts at the species default - the cheap affordable body the reset gate is
+reaching for - and then walks six rounds of `_mutated_genes`, the same
+mutation everything else here uses. At rate 0.1 that touches about half of the
+seven genes, so roughly three differ. Both bypass paths now call it; the
+founding population and every other direct `_spawn_creature` caller are
+untouched (the one test that references it asserts on the default, and still
+passes). Viewer draws pale-blue "outside blood" spokes on a body, one per
+off-default gene, and adds `outside blood N/M genes` to the stats line.
 
 ## What to watch next run
 
-- **"yielding" above zero at all** means the mechanic is firing. It will read
-  0 whenever the herd is thin or spread out; that is correct, not a failure.
-- **Population is the only number that matters now.** If the grid does not
-  climb past 4-5 within a few hundred ticks, the welded-twin story was not the
-  whole story and I need the next mechanism, not another price.
-- **Hunters have been extinct for a very long time** and the door is nearly
-  shut: `_prey_on_the_hoof` needs 90, and three grazers at ~35 energy come to
-  ~96, i.e. a 0.13% per-tick chance. It is self-clearing BY DESIGN - a herd
-  that compounds opens it - so if the prey side finally compounds, expect
-  hunters back and expect them to matter. Do NOT loosen that gate to hurry it.
-  If the herd reaches 6+ and hunters still never come, THEN look at it.
-- **Second-order:** with a real herd, herd cover, gregariousness (0.0) and the
-  groves all get sampled for the first time. Watch whether gregariousness now
-  has a visible price - standing together means giving up the plant you were
-  nearest to, which this change just made a real cost.
+- **"outside blood" above 0 at all.** It read 0/28 this run. Any non-zero
+  number means a stranger has come through a door; a number that stays up
+  across a few hundred ticks means one has BRED, which is the actual test.
+- **Whether the snapshot ever shows two different animals again.** Averages
+  landing on non-round numbers is the cheap tell.
+- **Whether any gene finds a non-zero optimum.** Every registry trait has its
+  default equal to its minimum, so a trait at 0.0 has never once been tested
+  against a trait at 0.5 in a population that lived. That comparison is now
+  possible for the first time.
+- Population is still the number that matters: 2 at 8298, 3 at 8963, 4 at
+  9025. Climbing, slowly. The forage-assignment change from last run cannot be
+  judged yet - too few ticks, and "yielding" will read 0 with a herd this thin,
+  which is correct and not a failure.
+
+## The arithmetic I should stop re-deriving
+
+Income 18/tick, upkeep 1/tick at the current body, breeding bar a flat 60,
+birth spends 40 and leaves the parent 20 with a newborn on 20. Energy capacity
+is something like 18 animals. The grid holds 4. So this world is NOT energy
+limited and has not been for three runs - do not price anything again without
+a specific reason. What it is limited by is some combination of search (speed
+1, sense 5 is a nearly blind, nearly immobile animal on 1600 tiles) and, until
+this run, having no genetic variation at all with which to fix that.
+
+Note the trap in the defaults themselves: `FREE_SENSE_RANGE` is 6 and the
+species default is 5, so this world hands every founder a horizon strictly
+worse than the one it charges nothing for. A wild draw can now walk off that.
+If it doesn't within a few hundred ticks, raising the default to the free
+allowance is a legitimate one-line follow-up - but let the draw try first.
 
 ## Still queued, in the order I would take it
 
-- **Unify the two fresh-stock rules.** GRAZER_TRICKLE_FRESH_SHARE (flat 0.3,
-  grazer-only, fires while ALIVE and thin) and `_founding_reset_chance`
-  (computed, both species, fires on extinction) now do the same job two ways.
-  The computed one has PROVEN OUT this run (speed 8.0 -> 1.33), so the trickle
-  should just call it and the flat constant should go.
+- **Unify the two fresh-stock rules.** They now BOTH route through
+  `_wild_creature`, so the remaining duplication is only the share: the flat
+  `GRAZER_TRICKLE_FRESH_SHARE` (0.3, grazer-only) versus the computed
+  `_founding_reset_chance` (both species). The computed one has proven out
+  twice. The trickle should call it and the flat constant should go.
 - `remember()` de-duplication (don't append a genome identical to one already
-  in the window).
+  in the window). Cheaper and more useful now that variation may actually
+  exist to preserve.
 - Per-species TRAIT_REGISTRY: still not worth the refactor risk. Leave it.
-- Performance guard (herd-cover O(n^2), viewer's arrivalField 1600-tile sweep,
-  `_open_ground`, and now `_forage_assignment` which is O(grazers x plants)):
-  all fine at n=3, all worth a look if this world ever holds thirty animals.
+- Performance guard (herd cover, the viewer's 1600-tile arrivalField sweep,
+  `_open_ground`, `_forage_assignment`): all fine at n=4, worth a look if this
+  world ever holds thirty animals.
 
 ## Standing lessons
 
@@ -86,12 +94,15 @@ slash with a broken stub and adds "yielding" to the stats line.
    MECHANIC. Twelve times confirmed.
 2. A memory that only records successes cannot correct itself once the only
    remaining success is a failure by another name.
-3. **New, and the expensive one: a price is not the only kind of cause.** I
-   spent three consecutive runs pricing metabolism because the genome snapshot
-   is a list of costs and costs are what a snapshot shows. The actual killer
-   was an ORDERING artefact - two animals on one tile, a deterministic
-   argmax, and a list the parent happens to sit at the front of - and it was
-   invisible in every statistic this world reports, because it never appears
-   as a number anywhere. Before the next balance change, ask what the tick
-   loop DOES step by step to two animals standing in the same place, not just
-   what it charges them.
+3. A price is not the only kind of cause. Three runs went on metabolism
+   because the snapshot is a list of costs; the killer was an ordering
+   artefact that never appeared as a number anywhere.
+4. **New: read the snapshot for what it is, not for what it trends toward.**
+   The number that mattered this run was not a direction - it was that seven
+   averages all landed on exactly their defaults at the same time. A
+   distribution collapsed to a point is a fact about the CODE that produces
+   genomes, never about selection. Look for suspiciously round numbers.
+5. **And: check what a function does when its optional argument is absent.**
+   `_spawn_creature(species)` and `_spawn_creature(species, lineage=...)` are
+   different functions wearing one name, and two later mechanics were built on
+   the branch that quietly does nothing.
