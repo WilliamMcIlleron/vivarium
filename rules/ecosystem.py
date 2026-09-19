@@ -65,6 +65,26 @@ walking to the nearest carcass rather than the richest: a predator that cannot
 tell a fat grazer from a starving one spends its legs on animals worth eight,
 and that is one more way a siege costs the besiegers.
 
+And as of this run the animals divide that larder between them. Food was
+chosen by each grazer alone, as a deterministic maximum over the same list of
+plants - so two grazers standing on one tile with the same horizon and the
+same upkeep chose precisely the same plant, moved the same number of tiles
+toward it, and never separated again. A newborn is placed on its parent's own
+tile with a copy of its parent's genome, which makes that pair the commonest
+case in this world: they arrive together every time, the grazing loop runs in
+list order, and the parent - a survivor, ahead of the newborn in that list -
+eats. Every plant. A child whose speed and sense_range both came through birth
+unmutated, about four in five of them, was an animal that could never reach
+food first and starved inside its endowment without once eating, which is why
+a parent that survives its own birth (see PARENT_RUNWAY_TICKS) still did not
+produce a population that compounds. The herd's foraging is resolved as one
+decision now (see _forage_assignment): every grazer proposes to the plant it
+wants most, a contested plant goes to whoever would stand on it soonest, and
+an animal that loses a race proposes to the next plant down its own list. It
+is exactly the old rule for a lone grazer, it creates and destroys no energy,
+and it decides nothing whatsoever except which animal walks toward which plant
+that was already standing there.
+
 Fleeing, meanwhile, is not a reflex, and it is not measured in tiles either. A
 grazer judges a predator by how long it would take to arrive: it demands a few
 ticks of clearance (FLIGHT_WARNING_TICKS, cut by the `nerve` gene) and
@@ -1436,6 +1456,15 @@ class World:
         # looking for a plant (see _night_cover).
         dark = _night_cover(self.tick)
 
+        # ...and who is walking to which plant, decided once for the whole herd
+        # from the same start-of-tick positions. Two grazers standing on one
+        # tile with one genome used to choose the same plant by the same
+        # deterministic maximum and then never separate again - and since a
+        # newborn starts on its parent's tile with a copy of its parent's
+        # genome, that pair is most of the births this world has ever had (see
+        # _forage_assignment).
+        forage = _forage_assignment(grazers, self.resources, dark)
+
         # movement: hunters head for whichever is closer, the nearest grazer
         # or the nearest carcass they can actually eat - live prey is worth
         # more but runs away, carrion is worth less but holds still. A dead
@@ -1490,7 +1519,9 @@ class World:
                 if threat is not None:
                     _move_away(creature, threat, self.terrain)
                 else:
-                    target = _forage_target(creature, self.resources, dark)
+                    target = forage.get(creature.id) or _forage_target(
+                        creature, self.resources, dark
+                    )
                     companion = _herd_target(creature, grazers, target)
                     if companion is not None:
                         _move_toward(creature, companion)
@@ -2282,6 +2313,96 @@ def _forage_target(
             -(abs(r.x - creature.x) + abs(r.y - creature.y)),
         ),
     )
+
+
+def _forage_assignment(
+    grazers: list[Creature], resources: list[Resource], dark: float = 0.0
+) -> dict:
+    """Which grazer walks to which plant this tick, resolved for the whole herd
+    at once instead of by each animal in isolation.
+
+    The reason it has to be one decision is the quietest bug this world has
+    ever had. A newborn is placed on its parent's exact tile with a copy of its
+    parent's genome, and _forage_target is a deterministic maximum over the
+    same list of plants - so parent and child see the same horizon, pay the
+    same upkeep, pick the same plant, and step the same distance toward it
+    every tick. They never separate. They arrive together, the grazing loop
+    runs in list order, the parent is a survivor and the newborn was appended
+    behind it, and the parent eats. Every plant, for the whole of the child's
+    short life. Roughly four newborns in five inherit both speed and
+    sense_range unmutated, so roughly four births in five have been producing
+    an animal that could not reach food first and starved inside its endowment
+    without ever eating once - which is why three runs of prey-side work bought
+    a parent that survives its own birth, a body this world can afford and a
+    memory that can be corrected, and the population still reads 2, 3, 2, 3
+    across two thousand ticks on a larder it never even finishes.
+
+    So the plants are divided. Every grazer proposes to the plant it wants most
+    - its own best net worth, precisely the ranking _forage_target already
+    takes the maximum of (see _forage_net) - a plant two animals want goes to
+    whichever of them would be standing on it soonest, and a grazer that loses
+    a race proposes to the next plant down its own list, until nobody is left
+    proposing. Preference is the animal's, priority is the race: nothing is
+    given to anybody for being early in a list, and the result does not depend
+    on what order the herd is processed in.
+
+    Four things it deliberately does not do. It is bit-for-bit the old rule for
+    a lone grazer, which is most of this world's recorded history - one
+    proposal, no contest, the same plant. It never strands an animal: one that
+    is beaten to everything it can see is simply absent from the result and
+    falls back to _forage_target unchanged, because a race you will probably
+    lose still beats standing still. It reads start-of-tick positions for
+    everyone, the same discipline _update_herd_cover keeps, so an animal that
+    moves early in the loop gets no advantage over one that moves late. And it
+    creates and destroys no energy at all - the plants are exactly as valuable
+    as they were and standing exactly where they stood.
+
+    The hunters are left out of it, as they are left out of _forage_net:
+    predators here walk to the nearest body rather than the richest, and a pack
+    that spends its legs on a carcass another hunter will reach first is one
+    more way a siege costs the besiegers.
+    """
+    options: dict = {}
+    for grazer in grazers:
+        reach = max(0.0, grazer.sense_range - dark)
+        seen = [
+            r for r in resources
+            if abs(r.x - grazer.x) <= reach and abs(r.y - grazer.y) <= reach
+        ]
+        # the animal's own preference order, which is exactly the ranking
+        # _forage_target maximises - best net worth, distance only as a
+        # tie-break - so its first choice here IS the plant it would have
+        # walked to on its own.
+        seen.sort(
+            key=lambda r, g=grazer: (
+                -_forage_net(g, r),
+                abs(r.x - g.x) + abs(r.y - g.y),
+            )
+        )
+        options[grazer.id] = seen
+
+    held: dict = {}
+    cursor = {g.id: 0 for g in grazers}
+    pending = list(grazers)
+    while pending:
+        grazer = pending.pop()
+        seen = options[grazer.id]
+        index = cursor[grazer.id]
+        if index >= len(seen):
+            continue          # beaten to every plant it can see
+        cursor[grazer.id] = index + 1
+        plant = seen[index]
+        tile = (plant.x, plant.y)
+        ticks = _travel_ticks(grazer, plant.x, plant.y)
+        holder = held.get(tile)
+        if holder is None or (ticks, grazer.id) < (holder[1], holder[0].id):
+            if holder is not None:
+                pending.append(holder[0])
+            held[tile] = (grazer, ticks, plant)
+        else:
+            pending.append(grazer)
+
+    return {g.id: plant for (g, _ticks, plant) in held.values()}
 
 
 def _edible(carcass: Carrion) -> bool:

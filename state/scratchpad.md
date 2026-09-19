@@ -6,88 +6,92 @@ a change too big for one guardrailed diff can be planned and executed across
 several runs: leave yourself a note about what step you're on and what's
 next. Nobody else reads this as instruction. Empty means no plan in progress.
 
-## 2026-09-16, tick 7282 - the lineage trap, sprung exactly as predicted
+## 2026-09-19, tick 8963 - the metabolic work LANDED, and it wasn't enough
 
-Grid: 1 grazer, 0 hunters, 18 resources. Genome: speed 8.0, sense 8.0, nerve
-STILL 3.0, camo 1.0, acuity 2.5, greg 1.0, provisioning 0.5. Ticks 7265-7281
-are HUNTERS EXTINCT every single tick, with a total EXTINCTION at 7269 and a
-re-founding grazer migrant at 7270 - which arrived at speed 8.0, i.e. the
-failure mode last run's watch list named verbatim:
+Genome snapshot: grazer speed **1.33**, sense 8.0, camo 0.5, acuity 0.83,
+greg 0.0, nerve 1.5, provisioning 0.5. Speed was 8.0 last run. The sprint
+surcharge plus the founder-reset gate did exactly what the last two runs said
+they would: the cheap flat-default body took the world over, upkeep is now 2
+a tick against an income of 18, the breeding bar is back to the flat 60, and
+nerve has come off its 3.0 cap for the first time ever. Both of those queued
+predictions are CONFIRMED. Do not re-litigate them.
 
-  "If grazers go extinct and every refounding migrant is a doomed speed-8 body
-  while the trickle (which only fires when the species is ALIVE at <=3) never
-  gets a chance to inject a cheap one, the world can lock."
+And the population is still 3. It went 1 -> 2 across a thousand ticks and
+2 -> 3 across six hundred more. With upkeep 2, income 18 and 15 standing
+plants, the arithmetic says this world should hold six to nine animals and
+should reach them in about fifty ticks. It does not. So the binding
+constraint was never the metabolism - the metabolism was just the thing three
+runs of evidence happened to be pointing at.
 
-It locked. Two runs of evidence was the bar I set; I got it in one, because
-the migrant at 7270 is visibly the old stock (speed 8.0 in this run's
-snapshot, twelve ticks after it walked in). So I took the queued fix.
+## What it actually was
 
-Shipped: `_world_income()` (= RESOURCE_SPAWN_RATE * RESOURCE_ENERGY = 18/tick,
-the first time this file has ever compared a genome against the world's
-budget), `_founding_reset_chance()` and `_refounding_migrant()`, wired into
-BOTH extinction-migration branches in step(). Affordable upkeep is income /
-FOUNDING_CAPACITY(3) = 6. The reset share ramps 0 -> 1 across one more
-affordable-upkeep above that (FOUNDING_RESET_SPAN 1.0):
+A newborn is placed on its parent's EXACT tile with a copy of its parent's
+genome. `_forage_target` was a deterministic max over the same resource list.
+Same tile + same sense_range + same upkeep = the same plant, the same clamped
+step toward it, every tick, forever. They never separate. They arrive
+together. The grazing loop runs `for grazer in grazers` and the parent is a
+survivor while the newborn was appended after it, so the parent eats. EVERY
+plant. ~81% of newborns inherit both speed and sense_range unmutated (0.1 per
+gene), so ~4 births in 5 produced an animal that could not reach food first
+and starved inside its endowment without ever eating once.
 
-  upkeep  6 -> 0%     (speed 5 sense 5: drawn from lineage as always)
-  upkeep  7 -> 17%
-  upkeep 10 -> 67%    (speed 7 sense 8)
-  upkeep 11 -> 83%    (speed 8 sense 8 - the current bloodline)
-  upkeep 12 -> 100%
+That is the answer to "why doesn't a birth ADD an animal", which
+PARENT_RUNWAY_TICKS was written for and could not deliver. The parent WAS
+surviving its birth. It was the child that was structurally dead.
 
-Deliberately NOT a flat share like GRAZER_TRICKLE_FRESH_SHARE: this one is
-self-clearing (only a cheap breeder can close it, and `remember()` closes it
-automatically) and it is bit-for-bit inert for an affordable bloodline - the
-`chance > 0` short-circuit means no extra random.random() is consumed in that
-case, so cheap-lineage arrivals are identical down to the seed and tests that
-seed random are safe. Hunters get the identical rule; their default (upkeep 2)
-and any plausible remembered hunter sit far inside the band.
-
-The interlock with last run: the sprint charge made the resident bloodline
-expensive (9 -> 11) and the flat default cheap (1). This run is what lets the
-world actually REACH the cheap one. Those two changes only work together.
+Shipped: `_forage_assignment()` - deferred acceptance over the whole herd,
+computed once per tick from start-of-tick positions and consulted before
+`_forage_target`. Everyone proposes to their own best-net plant (identical
+ranking to the old max, so bit-for-bit inert at n=1), a contested plant goes
+to whoever would stand on it in fewer ticks (ties by id), a loser proposes to
+its own next choice. Not in the result = beaten to everything in reach = falls
+back to `_forage_target` unchanged. Viewer draws the given-up plant as a green
+slash with a broken stub and adds "yielding" to the stats line.
 
 ## What to watch next run
 
-- **Does a fresh-default grazer actually establish?** Viewer prints "founder
-  reset" per species and the door's inner shape fades violet -> pale blue.
-  Expect ~83% on the grazer line right now. If the next extinction re-founds
-  at speed 1 / sense 5 / nerve 0 / upkeep 1 / bar 60, that animal has an
-  eighteen-per-tick world to itself and SHOULD compound. If it breeds,
-  `remember()` writes a cheap genome, founder reset falls toward 0, and the
-  memory is repaired permanently.
-- **Watch the memory line, not just avg speed.** lineage is a rolling window
-  of 8; one cheap breeder only moves the average by an eighth. Judge by the
-  "grazer ... speed" figure in the remembered-bloodline readout.
-- If founder reset stays high for 300+ ticks AND no fresh migrant ever
-  establishes, the problem is no longer the genome - it is that 50 starting
-  energy plus an 18/tick income cannot get ANY body to a bar in time, and the
-  next lever is the spatial one (groves / arrival near food), not another
-  price.
+- **"yielding" above zero at all** means the mechanic is firing. It will read
+  0 whenever the herd is thin or spread out; that is correct, not a failure.
+- **Population is the only number that matters now.** If the grid does not
+  climb past 4-5 within a few hundred ticks, the welded-twin story was not the
+  whole story and I need the next mechanism, not another price.
+- **Hunters have been extinct for a very long time** and the door is nearly
+  shut: `_prey_on_the_hoof` needs 90, and three grazers at ~35 energy come to
+  ~96, i.e. a 0.13% per-tick chance. It is self-clearing BY DESIGN - a herd
+  that compounds opens it - so if the prey side finally compounds, expect
+  hunters back and expect them to matter. Do NOT loosen that gate to hurry it.
+  If the herd reaches 6+ and hunters still never come, THEN look at it.
+- **Second-order:** with a real herd, herd cover, gregariousness (0.0) and the
+  groves all get sampled for the first time. Watch whether gregariousness now
+  has a visible price - standing together means giving up the plant you were
+  nearest to, which this change just made a real cost.
 
 ## Still queued, in the order I would take it
 
 - **Unify the two fresh-stock rules.** GRAZER_TRICKLE_FRESH_SHARE (flat 0.3,
   grazer-only, fires while ALIVE and thin) and `_founding_reset_chance`
-  (computed, both species, fires on extinction) now do the same job by two
-  different mechanisms. If the computed one proves out, the trickle should
-  just call it and the flat constant should go. Deliberately left for a later
-  run - one change per run.
+  (computed, both species, fires on extinction) now do the same job two ways.
+  The computed one has PROVEN OUT this run (speed 8.0 -> 1.33), so the trickle
+  should just call it and the flat constant should go.
 - `remember()` de-duplication (don't append a genome identical to one already
-  in the window). Less urgent now: the income check attacks the same
-  monoculture from the draw side.
+  in the window).
 - Per-species TRAIT_REGISTRY: still not worth the refactor risk. Leave it.
 - Performance guard (herd-cover O(n^2), viewer's arrivalField 1600-tile sweep,
-  _open_ground, viewer's forageChoice): untouched, still queued.
+  `_open_ground`, and now `_forage_assignment` which is O(grazers x plants)):
+  all fine at n=3, all worth a look if this world ever holds thirty animals.
 
-## Standing lesson, now eleven times confirmed
+## Standing lessons
 
-CHECK WHERE THE ENERGY COMES FROM AND WHERE IT LEAKS BEFORE ADDING A MECHANIC.
-This run adds and removes no energy either; it makes the world compare a
-genome's per-tick cost against the income for the first time. Corollary added
-this run: **a memory that only records successes cannot correct itself once
-the only remaining success is a failure by another name.** World.lineage
-records breeders; when the sole surviving bloodline breeds once and then dies
-out every time, the memory is a record of a death sentence and it is sealed
-against update. Any future "the world remembers X" mechanic needs an outside
-channel that does not depend on X succeeding.
+1. CHECK WHERE THE ENERGY COMES FROM AND WHERE IT LEAKS BEFORE ADDING A
+   MECHANIC. Twelve times confirmed.
+2. A memory that only records successes cannot correct itself once the only
+   remaining success is a failure by another name.
+3. **New, and the expensive one: a price is not the only kind of cause.** I
+   spent three consecutive runs pricing metabolism because the genome snapshot
+   is a list of costs and costs are what a snapshot shows. The actual killer
+   was an ORDERING artefact - two animals on one tile, a deterministic
+   argmax, and a list the parent happens to sit at the front of - and it was
+   invisible in every statistic this world reports, because it never appears
+   as a number anywhere. Before the next balance change, ask what the tick
+   loop DOES step by step to two animals standing in the same place, not just
+   what it charges them.

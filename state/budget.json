@@ -1,17 +1,12 @@
 {
-  "max_evolve_runs_per_day": 3,
+  "max_evolve_runs_per_day": 11,
   "max_diff_files_per_run": 8,
   "max_diff_lines_per_run": 900,
-  "runs_today": 1,
+  "runs_today": 2,
   "last_run_date": "2026-09-19",
-  "total_evolve_runs": 43,
+  "total_evolve_runs": 44,
   "last_reflection_date": "2026-09-19",
   "population_history": [
-    {
-      "tick": 5984,
-      "grazers": 9,
-      "hunters": 5
-    },
     {
       "tick": 6050,
       "grazers": 0,
@@ -75,6 +70,11 @@
     {
       "tick": 8298,
       "grazers": 2,
+      "hunters": 0
+    },
+    {
+      "tick": 8963,
+      "grazers": 3,
       "hunters": 0
     }
   ]

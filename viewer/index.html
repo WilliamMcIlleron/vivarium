@@ -185,6 +185,7 @@
     <span class="swatch"><span class="dot" style="background:var(--resource)"></span>resource (grows where light reaches the ground, so it clusters in the open - and fattens the longer nobody eats it: small and dark is freshly sprouted and worth what a resource here has always been worth, big and pale is a plant that has stood a hundred ticks, ringed once it can grow no further)</span>
     <span class="swatch"><span class="dot" style="background:rgba(232,192,125,0.22);width:12px;height:12px"></span>grove (the soft amber haze: ground a standing plant can actually sow. A resource left alone for ten ticks sows the next one within three tiles of itself, so food grows in patches instead of an even sprinkle over sixteen hundred tiles - and a population eating every plant the tick it sprouts never lets one reach seed at all, and lives on the flat scatter this world always had. Overlapping haze is a grove, dense and ripe enough for a newborn to feed on the tile it was born on; a bare diamond with no haze is a plant that will be eaten before it ever reproduces.)</span>
     <span class="swatch"><span class="bar" style="background:var(--resource)"></span>worth the walk (the dashed amber thread running from a grazer to the ringed plant it has actually chosen. Food used to be taken by distance alone, so the ripening larder and the groves growing out of it were invisible to the only thing in this world that eats them; a grazer now takes the plant worth the most once the walk is paid for - its value on arrival, minus the upkeep of the body going to get it. A short dim thread to the nearest diamond is a flat world of identical sprouts where the choice means nothing and the behaviour is exactly the old one; a long bright thread reaching past close food into a patch of fat pale plants is an animal crossing its whole horizon for a meal worth three of the ones at its feet - and an expensive body, burning more per tick, writes off that distance far harder than a cheap one does.)</span>
+    <span class="swatch"><span class="bar" style="background:var(--creature-high);transform:rotate(-45deg)"></span>spoken for (the green slash across a diamond, with a short broken green stub pointing at it from the animal that gave it up: a plant this grazer wanted most and another grazer will stand on sooner. Food was chosen by every animal alone, as the same deterministic maximum over the same list, so two grazers on one tile with one genome picked the same plant and stepped the same distance toward it forever - and since a newborn is placed on its parent's tile with a copy of its parent's genome, that pair was most of the births this world has ever had: they arrived together, the parent ate first every single time, and a child that inherited both genes unmutated starved inside its endowment without eating once. The herd divides the larder now - everyone proposes to what they want most, a contested plant goes to whoever gets there soonest, and the loser takes its own next choice - so a slash on screen is two animals that used to be welded together walking to two different meals. A lone grazer has none, and neither does a herd with food to spare.)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--carrion)"></span>carcass (a grazer's body - the only carrion a hunter can eat; fades as it rots, and as of this run its SIZE and its orange quarry rim are what a scavenger would actually bank for it. A carcass used to be a flat 30 whatever condition the animal fell in, so a grazer the hunters had starved was worth four times more to them dead than alive; a body is worth the body now, which makes a starveling's corpse a bare speck and an old animal that died fat a genuine windfall.)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--carrion-inedible);border-style:dotted"></span>hunter remains (crossed out: predators no longer live off their own dead, so this is scenery)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--migrant);border-style:dashed"></span>migrant (just arrived, carries remembered genes)</span>
@@ -328,7 +329,75 @@ function forageChoice(c, resources, dark) {
     if (man < nearMan) { near = r; nearMan = man; }
   }
   if (!best) return null;
-  return { plant: best, premium: resourceEnergy(best) - resourceEnergy(near) };
+  return { plant: best, near, premium: resourceEnergy(best) - resourceEnergy(near) };
+}
+
+// Mirror of _forage_assignment() in rules/ecosystem.py: who is walking to which
+// plant. Food used to be chosen by each grazer alone, as a deterministic
+// maximum over the same list, so two animals standing on one tile with the same
+// horizon and the same upkeep chose the same plant and stepped the same
+// distance toward it forever. A newborn starts on its parent's tile with a copy
+// of its parent's genome, so that pair was the common case: they arrived
+// together, the parent (ahead of the newborn in the list the grazing loop runs
+// in) ate first every single time, and a child that inherited both genes
+// unmutated starved inside its endowment without eating once. Everyone proposes
+// to the plant they want most, a contested plant goes to whoever would stand on
+// it soonest (ties by id), and a grazer that loses proposes to its own next
+// choice - which makes the result independent of what order the herd is walked
+// in, exactly as it is in the sim.
+function forageAssignment(grazers, resources, dark) {
+  const options = new Map();
+  for (const g of grazers) {
+    const reach = Math.max(0, (g.sense_range || 0) - dark);
+    const seen = resources.filter(r =>
+      Math.abs(r.x - g.x) <= reach && Math.abs(r.y - g.y) <= reach);
+    seen.sort((a, b) => {
+      const net = forageNet(g, b) - forageNet(g, a);
+      if (net !== 0) return net;
+      return (Math.abs(a.x - g.x) + Math.abs(a.y - g.y))
+        - (Math.abs(b.x - g.x) + Math.abs(b.y - g.y));
+    });
+    options.set(g.id, seen);
+  }
+  const held = new Map();
+  const cursor = new Map(grazers.map(g => [g.id, 0]));
+  const pending = grazers.slice();
+  while (pending.length) {
+    const g = pending.pop();
+    const seen = options.get(g.id);
+    const i = cursor.get(g.id);
+    if (i >= seen.length) continue;   // beaten to every plant it can see
+    cursor.set(g.id, i + 1);
+    const plant = seen[i];
+    const tile = plant.x + ',' + plant.y;
+    const ticks = travelTicks(g, plant.x, plant.y);
+    const holder = held.get(tile);
+    if (!holder || ticks < holder.ticks
+        || (ticks === holder.ticks && g.id < holder.grazer.id)) {
+      if (holder) pending.push(holder.grazer);
+      held.set(tile, { grazer: g, ticks, plant });
+    } else {
+      pending.push(g);
+    }
+  }
+  const chosen = new Map();
+  for (const h of held.values()) chosen.set(h.grazer.id, h.plant);
+  return chosen;
+}
+
+// What this grazer will actually walk to, and what it gave up to get there: the
+// assignment above where it has one, its own unconstrained best otherwise -
+// which covers both the lone grazer and the animal beaten to everything in
+// reach, the two cases where the sim falls back to exactly the old rule as well.
+function forageDecision(c, resources, dark, chosen) {
+  const wanted = forageChoice(c, resources, dark);
+  if (!wanted) return null;
+  const plant = (chosen && chosen.get(c.id)) || wanted.plant;
+  return {
+    plant,
+    premium: resourceEnergy(plant) - resourceEnergy(wanted.near),
+    yielded: plant === wanted.plant ? null : wanted.plant,
+  };
 }
 
 // Mirror of _kill_value() in rules/ecosystem.py: what a hunter actually banks
@@ -1222,9 +1291,15 @@ function draw(now) {
   // old behaviour; it brightens and lengthens as the animal walks past close
   // food for something fatter, so a bright thread reaching across the map into
   // a grove is this change doing the thing it exists to do.
-  for (const c of creatures) {
-    if (c.species === 'hunter') continue;
-    const choice = forageChoice(c, world.resources || [], dark);
+  const foragers = creatures.filter(c => c.species !== 'hunter');
+  const chosenPlants = forageAssignment(foragers, world.resources || [], dark);
+  const forageChoices = new Map();
+  for (const c of foragers) {
+    forageChoices.set(c.id,
+      forageDecision(c, world.resources || [], dark, chosenPlants));
+  }
+  for (const c of foragers) {
+    const choice = forageChoices.get(c.id);
     if (!choice) continue;
     const gain = Math.max(0, Math.min(1,
       choice.premium / (RESOURCE_MAX_ENERGY - RESOURCE_ENERGY)));
@@ -1247,6 +1322,35 @@ function draw(now) {
     ctx.arc(tx, ty, cell * 0.44, 0, Math.PI * 2);
     ctx.stroke();
     ctx.globalAlpha = 1;
+
+    // ...and the plant it gave up. A grazer beaten to its first choice walks to
+    // its next one instead (see _forage_assignment in rules/ecosystem.py), so
+    // the amber thread above is the meal it is actually going to get and this
+    // short broken stub, ending in a slash across the diamond, is the one
+    // another grazer will reach sooner. Green, because the thing standing in
+    // the way is another grazer - the only marking here that paints a plant in
+    // the prey's own colour. A map with no slashes on it is a herd too thin to
+    // compete with itself, which is every tick this world has run until now.
+    if (choice.yielded) {
+      const yx = choice.yielded.x * cell + cell / 2;
+      const yy = choice.yielded.y * cell + cell / 2;
+      ctx.globalAlpha = c.alpha * 0.30;
+      ctx.strokeStyle = '#9fffc4';
+      ctx.lineWidth = Math.max(0.5, cell * 0.022);
+      ctx.setLineDash([cell * 0.09, cell * 0.15]);
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + (yx - cx) * 0.36, cy + (yy - cy) * 0.36);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = c.alpha * 0.55;
+      ctx.lineWidth = Math.max(0.7, cell * 0.04);
+      ctx.beginPath();
+      ctx.moveTo(yx - cell * 0.27, yy + cell * 0.27);
+      ctx.lineTo(yx + cell * 0.27, yy - cell * 0.27);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
   }
 
   // flight distance: the ground a grazer insists on keeping between itself
@@ -1744,12 +1848,22 @@ function draw(now) {
   // a grazed-flat world should look like. A big number is ripe ground standing
   // and animals crossing their own horizon to reach it, and it should read
   // against "in seed": groves are where the premium comes from.
-  const walkWorth = creatures
-    .filter(c => c.species !== 'hunter')
-    .reduce((sum, c) => {
-      const choice = forageChoice(c, world.resources || [], dark);
-      return sum + (choice ? choice.premium : 0);
-    }, 0);
+  const walkWorth = foragers.reduce((sum, c) => {
+    const choice = forageChoices.get(c.id);
+    return sum + (choice ? choice.premium : 0);
+  }, 0);
+
+  // ...and how many grazers are walking to their SECOND choice because another
+  // grazer gets to their first one sooner (see _forage_assignment in
+  // rules/ecosystem.py). Zero is a herd thin enough, or spread wide enough,
+  // that nobody is racing anybody - which is every tick this world ran before
+  // now. Anything above zero is two animals that would previously have walked
+  // to the same plant in lockstep and arrived in list order, and the pair that
+  // matters most is a parent and the newborn standing on its tile.
+  const yieldingCount = foragers.filter(c => {
+    const choice = forageChoices.get(c.id);
+    return choice && choice.yielded;
+  }).length;
 
   // The predators' larder: what the whole grazer population is currently worth
   // if it were caught (see _kill_value in rules/ecosystem.py). Read it against
@@ -1864,6 +1978,7 @@ function draw(now) {
     `<span>larder <b>${larder}</b></span>` +
     `<span>in seed <b>${inSeed}</b></span>` +
     `<span>worth the walk <b>${walkWorth}</b></span>` +
+    `<span>yielding <b>${yieldingCount}</b></span>` +
     `<span>prey on the hoof <b>${onTheHoof}</b></span>` +
     `<span>safe ground <b>${(arrival.safeFraction * 100).toFixed(0)}%</b></span>` +
     `<span>predator draw <b>${predatorDraw > 0
