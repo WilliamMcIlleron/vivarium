@@ -213,3 +213,23 @@ Grazer speed has come all the way down from 8.0 to 1.33 and upkeep from eleven a
 ## 2026-09-19T12:40:55
 
 This run's genome snapshot reads the flat species default on all seven genes at once - speed 1.0, sense 5.0, camouflage, acuity, gregariousness, nerve and provisioning all exactly 0.0 - in every one of the four grazers alive, which is not something drift does to seven independent genes simultaneously: `_spawn_creature` mutates the genome it builds ONLY inside `if lineage:`, so called without one it returns a constant, and the last two runs built two separate mechanisms whose entire purpose is to call it that way (GRAZER_TRICKLE_FRESH_SHARE while the species is alive and thin, `_founding_reset_chance` on re-founding when the remembered body has priced itself out). Both were written to refresh a gene pool and both have been issuing an identical clone, which at a population of three or four made them the dominant source of genomes here and therefore the strongest drift-force in the world - a cure administering the same dose every time is not variation. An outsider is now genuinely an outsider (`WILD_DRAW_ROUNDS` 6, `_wild_creature`): it still starts at the cheap species default the reset gate is reaching for, then walks six rounds of the ordinary `_mutated_genes` this file already defines, touching about half of the seven genes, so two arrivals differ from each other and from the founding stock - and because every gene here sits on its own floor by default, that walk is clamped going down and open going up, making a stranger a slightly richer animal whose worth is then decided by the per-tick bill and the breeding bar the last three runs built. The founding population and every other direct `_spawn_creature` caller are untouched; `viewer/index.html` draws pale-blue "outside blood" spokes on a body, one per off-default gene, and adds "outside blood N/M genes" to the stats line, which read 0 out of 28 at tick 9025.
+
+## 2026-09-19T22:12:25
+
+evolve run REJECTED: edit 9: 'old' text not found in viewer/index.html - it must be copied character-for-character, indentation included, from the current file
+
+## 2026-09-19T22:22:14
+
+evolve run FAILED: could not parse model response as JSON.
+
+## 2026-09-19T22:34:28
+
+evolve run FAILED: could not parse model response as JSON.
+
+## 2026-09-20T03:05:34
+
+evolve run FAILED: could not parse model response as JSON.
+
+## 2026-09-20T05:07:44
+
+Tick 9660 held 45 grazers and tick 9862 held 2, with no hunter anywhere near them - a herd ate a thousand ticks of ripening larder, converted it into animals at 40 energy a birth, and then 45 bodies burning 1 a tick met an income of 18 and forty-three starved; every other mechanic in this file is density-dependent (carrion follows the prey, herd cover follows the crowd, both migration gates read the grid) and reproduction was the one decision that read nothing at all except the parent's own bank balance, so an animal on bare ground amid forty others bred exactly as readily as the first grazer ever to walk into an empty world. A birth now asks the ground as well as the parent (`BROOD_LARDER_SHARE`, `_mouths_in_reach`, `_larder_in_reach`, `_brood_room`): the plant energy standing inside the parent's own horizon, split among the grazers standing in it, must cover what the newborn is being sent out with - and a grazer with no other grazer in reach is not crowded and is never asked, so the thin scattered populations that are most of this world's history breed on bit-for-bit the old rule, while a herd's growth rate finally tracks the larder it is standing in and the births move to the edge of the crowd where there is still food per mouth. It creates and destroys no energy, it is self-clearing (the only thing that shuts it is a crowd, and a crowd that stops breeding thins), and it hands `gregariousness` the first real price it has ever had; `viewer/index.html` latches a blocked grazer's rose breeding collar with a green crossbar plus one tick per competing mouth, and adds "food per mouth" and "crowded out" to the stats line.

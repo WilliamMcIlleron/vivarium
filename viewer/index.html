@@ -175,6 +175,7 @@
     <span class="swatch"><span class="bar" style="background:var(--creature-high)"></span>herd bond (linked grazers are harder for a hunter to single out - brighter = deeper cover)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--creature-high);border-style:dotted"></span>gregariousness (how strongly a grazer walks to company instead of food)</span>
     <span class="swatch"><span class="arc"></span>breeding bar (the rose collar right on the body: a newborn is sent out with four ticks of the body it inherits, and the parent has to save up for that first - so a WIDE collar is an expensive animal with a high bar to clear, and a FULL one is an animal that will breed this tick. As of this run the collar carries a second mark: a short radial NOTCH at the energy the parent will be left holding afterwards. That was a flat 20 for every grazer that has ever lived here, which is twenty ticks of life for a speed-1 body and two and a half for the speed-7 ones this world actually breeds - so reproduction was one animal splitting into two that were both a few ticks from starving, which is why this grid keeps showing two or three grazers and then none. A parent must now keep four ticks of its own upkeep as well, floored at that old 20, and the shortfall is added to the bar. The arc from the notch round to the top of the ring is all a birth actually spends; everything below the notch is life the animal is required to still be carrying when it is done. Nothing changes for a cheap body, and nothing about the energy a birth burns changes for any body.)</span>
+    <span class="swatch"><span class="arc"></span><span class="bar" style="background:var(--creature-high)"></span>crowded out (the green bar straight across a grazer's rose breeding collar, with one short green tick standing off the collar per mouth eating the same plants it is. Reproduction here read nothing whatsoever except the parent's own bank balance, so a grazer on bare ground in the middle of forty others bred exactly as readily as the first animal ever to walk into an empty world - which is how tick 9660 held 45 grazers and tick 9862 held 2, with no hunter anywhere near them: a herd ate a thousand ticks of ripening larder, turned it into animals at 40 energy a birth, and then 45 bodies met an income of 18 and forty-three starved. Every other mechanic here is density-dependent and this one was not. A birth now asks the ground as well as the parent - the energy standing inside the parent's own horizon, split among the grazers standing in it, has to cover what the newborn is being sent out with. An animal with nobody else in reach is not crowded and is never asked, so a thin scattered population breeds exactly as this world always did; a full collar with a bar through it is a fat animal that will breed the instant the crowd thins or the ground under it grows back. Watch for births moving to the EDGE of a herd, where there is still food per mouth.)</span>
     <span class="swatch"><span class="core"></span>provisioning (the rose core, on either species: how much of itself this animal pours into each newborn on top of that runway - no energy is created, it only moves down a generation)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--hunter-high);border-width:2.5px"></span>quarry (the orange rim on a grazer: what a hunter would actually bank for catching it - the body plus everything that grazer has managed to eat, minus what is lost crossing between species - so a fed grazer glows to a predator and a starving one is barely worth the chase)</span>
     <span class="swatch"><span class="tri" style="border-bottom-color:var(--hunter-high)"></span>hunter (brighter = more energy)</span>
@@ -257,6 +258,7 @@ const MAX_SPRINT_COST = 4;     // only used to normalise how hot the burn is dra
 const ACUITY_COST = 1;         // must match ACUITY_COST - energy/tick per full point of a hunter's acuity
 const BIRTH_RUNWAY_TICKS = 4;  // must match BIRTH_RUNWAY_TICKS - ticks of its own upkeep a newborn starts with
 const PARENT_RUNWAY_TICKS = 4; // must match PARENT_RUNWAY_TICKS - ticks of its own upkeep a parent must still be holding once it has bred
+const BROOD_LARDER_SHARE = 1.0; // must match BROOD_LARDER_SHARE - newborn runways of standing food, per mouth in reach, a grazer needs around it before it may breed
 const REPRODUCE = {            // must match REPRODUCE - the species baselines the bar is measured from
   grazer: { threshold: 60, cost: 40 },
   hunter: { threshold: 110, cost: 55 },
@@ -703,6 +705,52 @@ function foundingResetShare(records, species) {
 function broodStake(c) {
   const invest = (c.traits && c.traits.provisioning) || 0;
   return invest <= 0 ? 0 : Math.floor(PROVISION_ENERGY * invest);
+}
+
+// Mirrors of _mouths_in_reach(), _larder_in_reach() and _brood_room() in
+// rules/ecosystem.py: whether the ground a grazer is standing on can carry the
+// animal it is about to add to it. Reproduction here used to read nothing
+// whatsoever except the parent's own bank balance, which is how tick 9660 held
+// 45 grazers and tick 9862 held 2 with no hunter anywhere near them - a herd
+// ate a thousand ticks of ripening larder, turned it into animals at 40 energy
+// a birth, and then starved at its own upkeep. The energy standing inside the
+// parent's horizon is split among the grazers standing in it, and that share
+// has to cover a newborn's runway. An animal with nobody else in reach is not
+// crowded and is never asked, so a thin scattered population is untouched.
+//
+// The viewer reads the saved end-of-tick world, so the newborns are already in
+// the herd it counts: it is showing the answer the NEXT tick will get, which is
+// the one worth looking at anyway.
+function mouthsInReach(c, grazers, dark) {
+  const reach = Math.max(0, (c.sense_range || 0) - dark);
+  let mouths = 1;
+  for (const o of grazers) {
+    if (o.id === c.id) continue;
+    if (Math.abs(o.x - c.x) <= reach && Math.abs(o.y - c.y) <= reach) mouths++;
+  }
+  return mouths;
+}
+
+function larderInReach(c, resources, dark) {
+  const reach = Math.max(0, (c.sense_range || 0) - dark);
+  let larder = 0;
+  for (const r of resources) {
+    if (Math.abs(r.x - c.x) <= reach && Math.abs(r.y - c.y) <= reach) {
+      larder += resourceEnergy(r);
+    }
+  }
+  return larder;
+}
+
+function broodShare(c, resources, grazers, dark) {
+  return larderInReach(c, resources, dark) / mouthsInReach(c, grazers, dark);
+}
+
+function broodRoom(c, resources, grazers, dark) {
+  if (c.species === 'hunter') return true;
+  if (mouthsInReach(c, grazers, dark) <= 1) return true;
+  return broodShare(c, resources, grazers, dark)
+    >= BROOD_LARDER_SHARE * birthWeight(c);
 }
 
 // How many of this animal's seven genes stand somewhere other than the flat
@@ -1746,8 +1794,14 @@ function draw(now) {
     ctx.arc(cx, cy, r, 0, Math.PI * 2);
     ctx.stroke();
 
+    // ...and whether the ground around it will actually let the birth happen
+    // (see _brood_room in rules/ecosystem.py). A collar that is full but
+    // latched is drawn faint, because the energy is saved and the birth is not
+    // coming.
+    const room = broodRoom(c, world.resources || [], foragers, dark);
     if (frac > 0) {
-      ctx.globalAlpha = c.alpha * (frac >= 1 ? 0.85 : 0.22 + 0.38 * frac);
+      ctx.globalAlpha = c.alpha * (frac >= 1 ? 0.85 : 0.22 + 0.38 * frac)
+        * (room ? 1 : 0.35);
       ctx.beginPath();
       ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2);
       ctx.stroke();
@@ -1775,6 +1829,40 @@ function draw(now) {
     ctx.lineTo(cx + Math.cos(keepAngle) * (r + cell * 0.11),
                cy + Math.sin(keepAngle) * (r + cell * 0.11));
     ctx.stroke();
+
+    // ...and the latch across the whole collar: the ground this grazer is
+    // standing on cannot carry the animal it is about to add to it (see
+    // _brood_room in rules/ecosystem.py). A bar straight across, because that
+    // is what this world's shut doors already look like - and green, because
+    // what closed this one is other grazers, the same green the "spoken for"
+    // slash uses for a plant another grazer will reach first. One short green
+    // tick stands off the collar per mouth eating the same plants this one is.
+    // A full rose collar with a green bar through it is an animal that has
+    // saved up every point a birth costs and is standing in a crowd that has
+    // eaten the ground out from under it; it opens the moment the herd thins or
+    // the larder around it grows back. Watch for births migrating to the EDGE
+    // of a herd, where there is still food per mouth - that is this change
+    // doing the thing it exists to do.
+    if (!room) {
+      const mouths = Math.min(12, mouthsInReach(c, foragers, dark));
+      ctx.globalAlpha = c.alpha * (0.28 + 0.45 * frac);
+      ctx.strokeStyle = '#9fffc4';
+      ctx.lineWidth = Math.max(0.8, cell * 0.045);
+      ctx.beginPath();
+      ctx.moveTo(cx - r, cy);
+      ctx.lineTo(cx + r, cy);
+      ctx.stroke();
+      ctx.globalAlpha = c.alpha * 0.42;
+      ctx.lineWidth = Math.max(0.6, cell * 0.028);
+      for (let i = 0; i < mouths; i++) {
+        const a = -Math.PI / 2 + (i * 2 * Math.PI) / mouths;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+        ctx.lineTo(cx + Math.cos(a) * (r + cell * 0.10),
+                   cy + Math.sin(a) * (r + cell * 0.10));
+        ctx.stroke();
+      }
+    }
     ctx.globalAlpha = 1;
   }
 
@@ -2030,6 +2118,26 @@ function draw(now) {
   // why the predators gain so little by it. Read it against "prey on the hoof".
   const starvedCount = grazersHere.filter(tooHungryToRun).length;
 
+  // What the ground each grazer is standing on is carrying per mouth eating it,
+  // and how many animals that number is currently keeping from breeding (see
+  // _brood_room in rules/ecosystem.py). Reproduction used to read nothing but
+  // the parent's own bank balance, which is how this grid held 45 grazers at
+  // tick 9660 and 2 at tick 9862 with no predator involved at all. "food per
+  // mouth" is the pressure building - read it against "larder", which is the
+  // same energy counted without asking how many animals are standing in it -
+  // and "crowded out" is that pressure biting: a grazer that has saved up
+  // everything a birth costs and is standing in a crowd that has eaten the
+  // ground flat. Both read 0 for a herd too thin to compete with itself, which
+  // is most of this world's history and is exactly the old behaviour.
+  const shareAvg = grazersHere.length
+    ? grazersHere.reduce((sum, c) =>
+        sum + broodShare(c, world.resources || [], foragers, dark), 0)
+      / grazersHere.length
+    : 0;
+  const crowdedCount = grazersHere.filter(c =>
+    (c.energy ?? 0) >= breedingBar(c)
+    && !broodRoom(c, world.resources || [], foragers, dark)).length;
+
   stats.innerHTML =
     `tick <b>${world.tick}</b>` +
     `<span>grazers <b>${world.grazers ?? grazerCount}</b></span>` +
@@ -2042,6 +2150,8 @@ function draw(now) {
     `<span>holding nerve <b>${nerveCount}</b></span>` +
     `<span>flight warning <b>${warnAvg.toFixed(1)}</b> ticks</span>` +
     `<span>too hungry to run <b>${starvedCount}</b></span>` +
+    `<span>food per mouth <b>${shareAvg.toFixed(0)}</b></span>` +
+    `<span>crowded out <b>${crowdedCount}</b></span>` +
     `<span>vision upkeep <b>${visionUpkeep}</b>/tick</span>` +
     `<span>gait upkeep <b>${gaitUpkeep}</b>/tick</span>` +
     `<span>avg speed <b>${speedAvg.toFixed(1)}</b></span>` +

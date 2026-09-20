@@ -854,6 +854,57 @@ BIRTH_RUNWAY_TICKS = 4
 # groves are all waiting on a population that compounds.
 PARENT_RUNWAY_TICKS = 4
 
+# What the ground underfoot has to be carrying before a grazer may add a mouth
+# to it.
+#
+# Tick 9660 is the largest population this world has ever held: 45 grazers, and
+# not one hunter anywhere on the grid. Tick 9862 is 2. Nothing hunted them. The
+# herd ate a larder that had been ripening for a thousand ticks, turned it into
+# animals at 40 energy a birth, and then 45 bodies burning 1 a tick met an
+# income of 18 and forty-three of them starved. That is not a predator/prey
+# crash and it is not bad luck - it is what a population does when it breeds off
+# a STOCK rather than off a FLOW.
+#
+# Every other mechanic in this file is density-dependent. Carrion follows the
+# prey; herd cover follows the crowd; both migration gates follow the state of
+# the grid; the flight warning follows the animal's own runway. Reproduction is
+# the one decision here that reads NOTHING except the parent's own bank
+# balance, so a grazer standing on bare ground in the middle of forty other
+# grazers breeds exactly as readily as the first animal ever to walk into an
+# empty world. There is no signal anywhere in a birth that says how many mouths
+# are already eating this patch.
+#
+# So a birth asks the ground as well as the parent. The energy standing in
+# plants inside the parent's own horizon is divided among the grazers standing
+# in it - the mouths already eating the same plants - and that share must cover
+# BROOD_LARDER_SHARE of what the newborn is being sent out with (see
+# _brood_room and _birth_weight). It reads exactly what the animal can see,
+# night penalty included, because an animal cannot count plants it cannot find.
+#
+# An animal with no other grazer inside its horizon is not crowded and is not
+# asked at all: it breeds on precisely the rule it always did. That exemption is
+# the whole safety of this change, because one or two animals scattered across
+# sixteen hundred tiles is most of this world's recorded history and nothing
+# about it moves. What moves is the top. A herd's growth rate now tracks the
+# larder it is actually standing in, so a boom slows down as it eats instead of
+# running flat out until everybody is starving - and the births go to the EDGE
+# of the crowd, where there is still food per mouth, which is the first spatial
+# structure reproduction has ever had here.
+#
+# It creates no energy and destroys none. A birth refused this tick is a birth
+# that happens later, on ground that can carry it, or to a different animal
+# standing somewhere emptier. And it is self-clearing like every other gate in
+# this file: the only thing that shuts it is a crowd, and a crowd that has
+# stopped breeding thins.
+#
+# Two genes get a price they have never had. `gregariousness` has sat at 0.0
+# since the day it was added, because walking toward company has only ever cost
+# missed meals; it costs fertility now, which is the currency selection actually
+# counts in. And `sense_range` gains a second meaning at the reproductive
+# bottleneck rather than only in the search, since what a far-sighted animal
+# sees is both more food AND more competitors for it.
+BROOD_LARDER_SHARE = 1.0   # newborn runways of standing food, per mouth in reach
+
 # Parental provisioning: extra energy a parent hands to its newborn, on top of
 # the standard endowment, per point of the `provisioning` gene.
 #
@@ -1663,6 +1714,15 @@ class World:
                 grazer.energy += _resource_energy(eaten)
 
         # reproduction, aging, death
+        #
+        # Who is left standing, and where, once the hunting and the grazing are
+        # finished: the herd a parent is actually about to add an animal to, and
+        # - since this tick's meals have already been taken off the list - the
+        # plants it has actually left on the ground for it (see _brood_room).
+        standing = [
+            c for c in self.creatures
+            if c.species == "grazer" and c.id not in killed_ids
+        ]
         newborns: list[Creature] = []
         survivors: list[Creature] = []
         for creature in self.creatures:
@@ -1676,7 +1736,14 @@ class World:
             # BIRTH_RUNWAY_TICKS), which for an expensive body means reaching a
             # higher number before it may breed at all - and for a cheap one
             # means exactly the species threshold it always was.
-            if creature.energy >= _breeding_bar(creature):
+            # ...and as of this run the bar is not the only thing between an
+            # animal and a child. A birth also asks whether the ground in reach
+            # can carry the mouth it is about to add, which is the first
+            # density-dependent thing reproduction here has ever read (see
+            # _brood_room). An animal standing on its own is never asked.
+            if creature.energy >= _breeding_bar(creature) and _brood_room(
+                creature, self.resources, standing, dark
+            ):
                 endowment = _birth_weight(creature)
                 creature.energy -= repro["cost"] + endowment - repro["cost"] // 2
                 # Life history: on top of the cost of breeding, the parent
@@ -2192,6 +2259,72 @@ def _provision(parent: Creature) -> int:
     if invest <= 0:
         return 0
     return max(0, min(int(PROVISION_ENERGY * invest), parent.energy - 1))
+
+
+def _mouths_in_reach(
+    grazer: Creature, grazers: list[Creature], dark: float = 0.0
+) -> int:
+    """How many grazers are standing close enough to this one to be eating the
+    same plants: itself, plus every other grazer inside its own horizon. Same
+    box shape and same night penalty _forage_assignment divides the larder by,
+    so the herd that competes for food and the herd that competes for room to
+    breed are the same herd. Never less than one - the animal asking the
+    question is always one of the mouths.
+    """
+    reach = max(0.0, grazer.sense_range - dark)
+    return 1 + sum(
+        1 for other in grazers
+        if other.id != grazer.id
+        and abs(other.x - grazer.x) <= reach
+        and abs(other.y - grazer.y) <= reach
+    )
+
+
+def _larder_in_reach(
+    grazer: Creature, resources: list[Resource], dark: float = 0.0
+) -> int:
+    """The energy standing in plants inside this grazer's horizon, valued the
+    way the animal that eats them values them (see _resource_energy). Measured
+    with exactly the reach the foraging code uses, so a grazer is judged on the
+    ground it can actually find and never on ground it merely happens to be
+    near.
+    """
+    reach = max(0.0, grazer.sense_range - dark)
+    return sum(
+        _resource_energy(r) for r in resources
+        if abs(r.x - grazer.x) <= reach and abs(r.y - grazer.y) <= reach
+    )
+
+
+def _brood_room(
+    grazer: Creature,
+    resources: list[Resource],
+    grazers: list[Creature],
+    dark: float = 0.0,
+) -> bool:
+    """Whether the ground this animal is standing on can carry the animal it is
+    about to add to it (see BROOD_LARDER_SHARE for the whole argument).
+
+    The larder in reach, split among the mouths in reach, must cover a newborn's
+    own runway. Nothing is created and nothing is spent - this only decides
+    WHEN a birth this world was going to allow anyway is allowed, which is the
+    one thing reproduction here has never taken any notice of.
+
+    Two deliberate exemptions. A hunter is never asked: its food walks away, so
+    there is no such thing as a plant standing in reach of it, and its own
+    threshold of 110 is already the harshest number in this file. And a grazer
+    with no other grazer inside its horizon is never asked either, because
+    crowding is the entire mechanic and an animal alone on the map is not
+    crowded - which means the thin, scattered populations that are most of this
+    world's history breed on bit-for-bit the rule they always did.
+    """
+    if grazer.species != "grazer":
+        return True
+    mouths = _mouths_in_reach(grazer, grazers, dark)
+    if mouths <= 1:
+        return True
+    share = _larder_in_reach(grazer, resources, dark) / mouths
+    return share >= BROOD_LARDER_SHARE * _birth_weight(grazer)
 
 
 def _update_herd_cover(grazers: list[Creature]) -> None:
