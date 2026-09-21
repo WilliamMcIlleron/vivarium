@@ -235,6 +235,25 @@ same animal and neither of them is the founding stock. No energy moves and no
 new rule is added - selection is simply given something to select between,
 which is the one thing it has never had here.
 
+And as of this run the world checks that memory against its own RECORD as well
+as its own budget. The re-founding gate asks whether this range can AFFORD a
+remembered body, which caught the speed-8 grazers; it has nothing whatsoever to
+say about the hunters, whose remembered body is a cheap speed-2 animal sitting
+well inside the affordable band and completely unable to make a living here.
+A hunter's reach for live prey is five tiles less the herd's camouflage, less
+herd cover, less canopy, less the dark, while a grazer sees an approaching
+hunter at a flat five with nothing subtracted at all - so the prey spots the
+predator first every single time, the predator arrives with fifty energy and
+starves in twenty-five ticks without a meal, and since lineage records only
+BREEDERS it never writes anything new. An affordable memory, refuted by
+experiment, and permanent. So the world counts how many times it has re-founded
+a species and buried it without a single birth (see FOUNDING_REFUSALS): past a
+few, the memory is set aside for an outsider, drawn further from home with each
+further refusal, and the first birth clears the count. Nothing is created and no
+price is relaxed - a stranger is billed per tick and billed again at the
+breeding bar exactly as anything else is - but a bloodline this world has
+disproved may finally be replaced.
+
 As of this run the migrant chooses WHERE, too. Arrival used to be two calls to
 random.randrange, which on a grid with two hunters standing on it dropped a
 returning grazer inside a predator's menace radius about as often as not - and
@@ -1082,6 +1101,58 @@ WILD_DRAW_ROUNDS = 6
 FOUNDING_CAPACITY = 3        # animals of a remembered body the income should carry
 FOUNDING_RESET_SPAN = 1.0    # how far past affordable the reset share ramps to certainty
 
+# ...and what the world's own RECORD says about a remembered body, as opposed
+# to what its budget says.
+#
+# _founding_reset_chance asks one question of a remembered genome: can this
+# range afford to RUN it? That caught the speed-8 grazer loop, because that
+# animal's crime was costing eleven a tick against an income of eighteen. It
+# cannot catch the loop the hunters have been in for most of this world's
+# recorded history, because the hunter it keeps re-founding with is CHEAP - a
+# speed-2 body burning 2 a tick, comfortably inside the affordable band, drawn
+# from memory every single time with the gate reading exactly zero.
+#
+# It is also blind. A hunter's effective reach for live prey is its sense_range
+# of 5, less the prey's camouflage (0.56 across the standing herd), less herd
+# cover, less canopy, less the dark, plus its own acuity - which is 0.0 in the
+# remembered stock and can move by at most a single mutation step per arrival.
+# A grazer's view of an approaching hunter is its flat sense_range of 5 with
+# nothing subtracted from it at all, and it flees at a panic radius wider than
+# either animal's eyes. So the prey sees the predator first, always, and the
+# predator is a blind man chasing a sighted one: it arrives with fifty energy,
+# burns it in twenty-five ticks without a meal, and dies. The event log is
+# twenty consecutive ticks of HUNTERS EXTINCT and has read that way for
+# thousands of ticks.
+#
+# And it is self-sealing in precisely the way the budget gate was built to
+# break. World.lineage records BREEDERS. A hunter that cannot eat cannot breed,
+# so it never writes anything new; the memory it is drawn from therefore never
+# changes; and the one gene that would let it see - acuity - needs two mutation
+# steps it is never given the generations to take.
+#
+# So the world counts its refusals. Every re-founding migrant increments a tally
+# (World.foundings) and the first birth of that species clears it, so the number
+# is exactly "times this world has re-founded you since you last managed to live
+# here". Below FOUNDING_REFUSALS nothing whatsoever changes - a species that
+# re-founds and breeds sits at zero forever, and one unlucky arrival is not
+# evidence. Past it the memory is set aside and an outsider comes instead (see
+# _wild_creature), drawn further from home with every additional refusal -
+# FOUNDING_WILD_STEP more rounds of ordinary mutation each time, capped at
+# WILD_DRAW_MAX_ROUNDS - because a world that has turned away the same animal
+# six times is not asking for a near relative of it.
+#
+# Nothing is created and no rule is relaxed. The stranger is judged by every
+# price this file charges: _upkeep bills it per tick, _breeding_bar bills it
+# again at the bottleneck, and an arrival that overpays for its body dies
+# exactly as the remembered one did - and increments the tally, so the next is
+# stranger still. What changes is that a bloodline this world has refuted by
+# experiment rather than by arithmetic may finally be replaced, and that the
+# predators get what the prey were given at tick 9025: something for selection
+# to choose between.
+FOUNDING_REFUSALS = 3        # re-foundings without a birth before the memory is set aside
+FOUNDING_WILD_STEP = 2       # extra rounds of outside blood per refusal past that
+WILD_DRAW_MAX_ROUNDS = 18    # how far from home a stranger may ever have come
+
 # How rich the prey has to be before a predator makes the journey.
 #
 # Hunter migration has been an unconditional coin flip since the first tick,
@@ -1391,6 +1462,12 @@ class World:
     # LINEAGE_MEMORY). Written only when a creature reproduces; read only when
     # a migrant arrives.
     lineage: dict = field(default_factory=lambda: {s: [] for s in SPECIES})
+    # species -> how many times it has been re-founded here since the last time
+    # one of them actually bred (see FOUNDING_REFUSALS). Incremented by the
+    # re-founding migrant, cleared by remember(), so it is this world's running
+    # count of how often it has tried the remembered genome and been proved
+    # wrong. Nothing reads it except which animal walks through the door.
+    foundings: dict = field(default_factory=lambda: {s: 0 for s in SPECIES})
 
     @classmethod
     def new(cls) -> "World":
@@ -1417,6 +1494,10 @@ class World:
         # starts blank, and the first birth of each species fills it in.
         remembered = data.get("lineage") or {}
         w.lineage = {s: list(remembered.get(s, [])) for s in SPECIES}
+        # A save from before the world counted its refusals starts every species
+        # at zero, which is exactly how it behaved when it was written.
+        refused = data.get("foundings") or {}
+        w.foundings = {s: int(refused.get(s, 0)) for s in SPECIES}
         # Saves from before terrain existed have no "terrain" key - generate
         # one rather than fail. A world with no terrain at all still runs:
         # every lookup falls back to open grass (see _terrain_at), i.e. no
@@ -1434,6 +1515,7 @@ class World:
             "resources": [asdict(r) for r in self.resources],
             "carrion": [asdict(k) for k in self.carrion],
             "lineage": {s: list(self.lineage.get(s, [])) for s in SPECIES},
+            "foundings": {s: int(self.foundings.get(s, 0)) for s in SPECIES},
             "terrain": self.terrain,
             "population": len(self.creatures),
             "grazers": grazers,
@@ -1450,6 +1532,22 @@ class World:
         record = self.lineage.setdefault(creature.species, [])
         record.append(creature.genes())
         del record[:-LINEAGE_MEMORY]
+        # ...and a bloodline that has just bred here is no longer a bloodline
+        # this world has been refusing (see FOUNDING_REFUSALS). The tally is
+        # cleared by the only evidence that could ever clear it.
+        self.foundings[creature.species] = 0
+
+    def refusals(self, species: str) -> int:
+        """How many times this species has been re-founded here since one of
+        them last managed to reproduce. Zero for anything that is breeding, and
+        zero for a species that has never gone extinct here at all."""
+        return int(self.foundings.get(species, 0))
+
+    def refuse(self, species: str) -> None:
+        """Record another re-founding of a species that has not yet proved it
+        can live here. Only remember() clears it, because only a birth is
+        evidence that the genome walking in was the right one."""
+        self.foundings[species] = self.refusals(species) + 1
 
     def step(self) -> None:
         """Advance the world by exactly one tick."""
@@ -1503,7 +1601,15 @@ class World:
             # own income before it is used: a remembered body this range
             # cannot feed is increasingly likely to be passed over for an
             # outsider at the flat species default (see _refounding_migrant).
-            migrant = _refounding_migrant("hunter", self.lineage.get("hunter"))
+            # ...and as of this run it is weighed against the world's own RECORD
+            # as well: a bloodline this world has re-founded and buried
+            # FOUNDING_REFUSALS times without a single birth is set aside for an
+            # outsider, however cheap it was to run. That is the whole of the
+            # hunters' history here (see FOUNDING_REFUSALS).
+            migrant = _refounding_migrant(
+                "hunter", self.lineage.get("hunter"), self.refusals("hunter")
+            )
+            self.refuse("hunter")
             # ...and it picks where it comes in, on the strength of its own
             # genome: a hunter arrives within sight of prey rather than on top
             # of it (see _arrival_site).
@@ -1522,7 +1628,10 @@ class World:
             not any(c.species == "grazer" for c in self.creatures)
             and random.random() < _grazer_migration_chance(self.creatures)
         ):
-            migrant = _refounding_migrant("grazer", self.lineage.get("grazer"))
+            migrant = _refounding_migrant(
+                "grazer", self.lineage.get("grazer"), self.refusals("grazer")
+            )
+            self.refuse("grazer")
             # A grazer no longer walks blindly into the jaws of whatever wiped
             # its species out: it comes in on ground that is outside the
                 # menace radius of every hunter it can manage, and close to
@@ -2097,7 +2206,9 @@ def _spawn_creature(
     )
 
 
-def _wild_creature(species: str, origin: str = "born") -> Creature:
+def _wild_creature(
+    species: str, origin: str = "born", rounds: "int | None" = None
+) -> Creature:
     """An animal out of this world's own history rather than out of its memory:
     the flat species default, walked WILD_DRAW_ROUNDS rounds of ordinary
     mutation away from itself (see WILD_DRAW_ROUNDS for the whole argument).
@@ -2115,7 +2226,12 @@ def _wild_creature(species: str, origin: str = "born") -> Creature:
     """
     migrant = _spawn_creature(species, origin=origin)
     speed, sense_range, traits = migrant.speed, migrant.sense_range, migrant.traits
-    for _ in range(WILD_DRAW_ROUNDS):
+    # `rounds` is how far from home this particular stranger has come. Left
+    # unset it is the ordinary WILD_DRAW_ROUNDS every outsider has always walked,
+    # so every existing caller is untouched; the re-founding door raises it once
+    # this world has refused the same remembered genome often enough to have
+    # disproved it (see _wild_rounds).
+    for _ in range(WILD_DRAW_ROUNDS if rounds is None else rounds):
         speed, sense_range, traits = _mutated_genes(speed, sense_range, traits)
     migrant.speed = speed
     migrant.sense_range = sense_range
@@ -2984,18 +3100,52 @@ def _founding_reset_chance(candidate: Creature) -> float:
     return min(1.0, (cost - afford) / span)
 
 
-def _refounding_migrant(species: str, lineage: list[dict] | None) -> Creature:
-    """The animal that walks in when a species has died out here entirely: a
-    mutated descendant of the remembered stock, unless that stock has priced
-    itself out of this world (see _founding_reset_chance), in which case an
-    outsider at the flat species default comes instead.
+def _wild_rounds(refusals: int) -> int:
+    """How far from home the next stranger comes, given how many times this
+    world has re-founded a species and buried it without a birth.
 
-    With no memory of the species at all, or with a memory this world can still
-    afford, this is precisely what it always was - and in that case it consumes
-    exactly the random draws it always did, so an affordable bloodline's
-    arrivals are identical down to the seed. Where the migrant lands is still
-    the caller's decision (see _arrival_site).
+    The base is the ordinary WILD_DRAW_ROUNDS an outsider has always been walked
+    through. Each refusal past FOUNDING_REFUSALS adds FOUNDING_WILD_STEP more,
+    up to WILD_DRAW_MAX_ROUNDS - because a world that has turned away the same
+    animal six times is not asking for a near relative of it, and because every
+    extra round is a larger draw on the very prices that will judge the animal
+    once it gets here.
     """
+    past = max(0, refusals - FOUNDING_REFUSALS + 1)
+    return min(
+        WILD_DRAW_MAX_ROUNDS, WILD_DRAW_ROUNDS + FOUNDING_WILD_STEP * past
+    )
+
+
+def _refounding_migrant(
+    species: str, lineage: list[dict] | None, refusals: int = 0
+) -> Creature:
+    """The animal that walks in when a species has died out here entirely: a
+    mutated descendant of the remembered stock, unless that stock has been
+    refuted - either by this world's budget (see _founding_reset_chance) or by
+    its record (see FOUNDING_REFUSALS) - in which case an outsider comes
+    instead.
+
+    The two refutations ask different questions and catch different loops. The
+    budget asks whether this range can afford to RUN a body, which is what the
+    speed-8 grazer bloodline failed. The record asks whether the body has ever
+    managed to make a living here, which is what the hunters' cheap, blind,
+    perfectly affordable bloodline has been failing for thousands of ticks
+    without the budget gate ever having a word to say about it.
+
+    Called without a refusal count - which is every caller this function had
+    until now, and everything in tests/ - it is precisely what it always was,
+    and consumes exactly the random draws it always did, so an affordable
+    bloodline's arrivals are identical down to the seed. Where the migrant lands
+    is still the caller's decision (see _arrival_site).
+    """
+    if refusals >= FOUNDING_REFUSALS:
+        # This world has tried that genome and buried it, over and over. What
+        # walks in now is a stranger, and the more often the memory has been
+        # refused the less like it that stranger is.
+        return _wild_creature(
+            species, origin="migrant", rounds=_wild_rounds(refusals)
+        )
     migrant = _spawn_creature(species, lineage=lineage, origin="migrant")
     chance = _founding_reset_chance(migrant) if lineage else 0.0
     if chance > 0.0 and random.random() < chance:

@@ -193,6 +193,7 @@
     <span class="swatch"><span class="ring" style="border-color:var(--stranger);border-style:dotted"></span>outside blood (the short pale-blue spokes standing off a body, one for every gene this animal carries somewhere other than the flat species default. The world's genome builder mutates only when it is handed a lineage, so every "fresh" migrant this world had ever produced - the trickle that bypasses memory while the species is alive and thin, the re-founding migrant thrown back when the remembered body has priced itself out - arrived as bit-for-bit the same animal: speed 1, sense 5, every trait exactly 0.0. That is what the genome snapshot read across all four grazers alive at tick 9025, on all seven genes at once, which is not something drift does. Two mechanisms written to refresh a gene pool were the largest single source of uniformity in it. A stranger now arrives having lived somewhere else - the same cheap default, walked a few rounds of this world's own mutation - so a bare body is the blank this place keeps re-founding itself with, and a crown of spokes is something new for selection to choose between. Because every gene here sits on its own floor by default, that walk is clamped going down and open going up: a stranger is a slightly richer animal than the blank, and the per-tick bill and the breeding bar are what decide whether it was worth being.)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--migrant);border-style:dotted"></span>the door (pulsing violet, with the absent species' own shape hollow inside it: where the next migrant of a species that has died out here would choose to come in - a grazer wants ground outside every hunter's menace radius and near something to eat, a hunter wants ground about a sense_range from the nearest prey. A real migrant only glances at two dozen tiles, so it lands near here rather than exactly here.)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--stranger)"></span>the stranger (the pale blue shape inside the door, and WHOSE body is coming through it. A re-founding migrant is a mutated draw from the world's genetic memory - but that memory only records animals that BRED here, and the only grazers that have bred here in a thousand ticks are the speed-8 stock burning eleven a tick against an income of eighteen. That is a carrying capacity of one and a half animals, so every extinction re-founded this world with another copy of the exact animal that had just failed to live in it, and since the copy never bred either, the memory could never update. The remembered body is now weighed against the world's own income: one this range could carry a population of is drawn from lineage exactly as before and the door's shape stays violet, while one that costs more per tick than the income split three ways fades toward this pale blue - an outsider at the flat species default, no camouflage, no nerve, and a body cheap enough to actually breed here. A fully pale shape ringed in dashes is this world about to forget a genome its own budget has already refuted; it goes violet again the moment something affordable breeds.)</span>
+    <span class="swatch"><span class="bar" style="background:var(--stranger)"></span>refused (the short strokes standing off a door, one for every time this world has re-founded a species and buried it without a single birth. The re-founding gate has only ever asked one question of a remembered genome - can this range AFFORD to run it - and that caught the speed-8 grazers, who cost eleven a tick against an income of eighteen. It has nothing to say about the hunters. Their remembered body is a cheap speed-2 animal sitting comfortably inside the affordable band, so the founder reset beside this reads 0% and always will; and it is blind, because a hunter's reach for live prey is five tiles less the herd's camouflage, less herd cover, less canopy, less the dark, while a grazer sees an approaching hunter at a flat five with nothing subtracted at all. The prey spots the predator first every single time, the predator burns its fifty energy in twenty-five ticks without a meal, and because the world's memory records only BREEDERS it never writes anything new - an affordable memory, refuted by experiment, sealed shut. The world counts its refusals now. The strokes are grey while it still trusts the memory; at three they go pale blue, the gate stops drawing on lineage altogether, and an outsider comes instead - walked further from home with every further stroke, and billed per tick and again at the breeding bar exactly like anything else here. The first birth clears the whole tally.)</span>
     <span class="swatch"><span class="ring" style="border-color:var(--muted)"></span>the latch (a grey bar across a door that is shut: neither species is called in by the calendar any more. A hunter comes only when the grazers standing here are worth the journey - and no single animal, however fat, can open that one. A grazer comes only when enough of the map lies outside every hunter's menace radius to be worth walking into, so a grid covered edge to edge by predators posts nothing more into itself and the besiegers, who cannot eat their own dead, starve the latch back open. Either gate widens, brightens and starts pulsing again as its own condition improves.)</span>
   </div>
   <div id="memory"></div>
@@ -235,6 +236,7 @@ const RESOURCE_ENERGY = 30;      // must match RESOURCE_ENERGY - what a plant is
 const RESOURCE_SPAWN_RATE = 0.6; // must match RESOURCE_SPAWN_RATE - one plant per roll, i.e. this world's entire income
 const FOUNDING_CAPACITY = 3;     // must match FOUNDING_CAPACITY - animals of a remembered body that income should carry
 const FOUNDING_RESET_SPAN = 1.0; // must match FOUNDING_RESET_SPAN - how far past affordable the reset share ramps to certainty
+const FOUNDING_REFUSALS = 3;     // must match FOUNDING_REFUSALS - re-foundings without a birth before the world sets the remembered genome aside
 const RESOURCE_RIPEN_TICKS = 2;  // must match RESOURCE_RIPEN_TICKS - ticks of undisturbed growth per extra energy
 const RESOURCE_MAX_ENERGY = 75;  // must match RESOURCE_MAX_ENERGY - where a plant stops putting on weight
 const SEED_MATURITY = 10;        // must match SEED_MATURITY - ticks a plant must stand before it can sow another
@@ -696,6 +698,23 @@ function foundingResetShare(records, species) {
   const cost = upkeep(body);
   if (cost <= afford) return 0;
   return Math.min(1, (cost - afford) / Math.max(1e-9, afford * FOUNDING_RESET_SPAN));
+}
+
+// The other half of that same question, new this run (see FOUNDING_REFUSALS in
+// rules/ecosystem.py). The gate above asks whether this world can AFFORD the
+// remembered body; this one asks whether that body has ever managed to make a
+// living here. World.foundings counts how many times a species has been
+// re-founded since one of them last bred, and the first birth clears it - so 0
+// is a bloodline that works, and anything at or above FOUNDING_REFUSALS is a
+// genome this world has tried and buried again and again. The hunters' memory is
+// cheap enough that the budget gate reads 0% forever and blind enough that it has
+// never once bred here, which is exactly the loop this number exists to see.
+function refusals(world, species) {
+  return Math.max(0, ((world.foundings || {})[species]) || 0);
+}
+
+function refusalShare(world, species) {
+  return Math.min(1, refusals(world, species) / Math.max(1, FOUNDING_REFUSALS));
 }
 
 // Mirror of _provision() in rules/ecosystem.py, minus the parent's affordability
@@ -1201,7 +1220,10 @@ function draw(now) {
     // the remembered stock and the pale blue of an outsider at the flat
     // species default: solidly violet is an ordinary bottleneck, pale and
     // ringed in dashes is this world about to forget a body it cannot feed.
-    const stranger = foundingResetShare((world.lineage || {})[species], species);
+    const refused = refusals(world, species);
+    const stranger = Math.max(
+      foundingResetShare((world.lineage || {})[species], species),
+      refusalShare(world, species));
     const gate = (0.45 + 0.30 * pulse) * (open > 0 ? 1 : 0.55);
     const doorShape = (rr) => {
       ctx.beginPath();
@@ -1230,6 +1252,33 @@ function draw(now) {
       ctx.strokeStyle = open > 0 ? '#c9b6ff' : '#5c7266';
       ctx.lineWidth = Math.max(0.6, cell * 0.04);
     }
+    // ...and the tally: one short stroke standing off the door for every time
+    // this world has re-founded this species and buried it without a single
+    // birth (see FOUNDING_REFUSALS in rules/ecosystem.py). Grey while the world
+    // is still willing to trust its memory, pale blue once it is not - at three
+    // it stops drawing on lineage altogether, the shape inside the gate goes
+    // fully pale, and the stranger that comes is walked further from home with
+    // every further stroke. The founder-reset percentage beside it has read 0%
+    // through thousands of ticks of HUNTERS EXTINCT, because a blind predator is
+    // a cheap one; this is the reading that was missing, and it is the only mark
+    // on screen that counts something the world itself got WRONG.
+    if (refused > 0) {
+      const marks = Math.min(12, refused);
+      ctx.strokeStyle = refused >= FOUNDING_REFUSALS ? '#bfe9ff' : '#5c7266';
+      ctx.globalAlpha = (0.28 + 0.46 * refusalShare(world, species))
+        * (0.55 + 0.45 * doorPulse);
+      ctx.lineWidth = Math.max(0.6, cell * 0.035);
+      for (let i = 0; i < marks; i++) {
+        const a = -Math.PI / 2 + (i * 2 * Math.PI) / marks + 0.3;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(a) * cell * 0.62, cy + Math.sin(a) * cell * 0.62);
+        ctx.lineTo(cx + Math.cos(a) * cell * 0.84, cy + Math.sin(a) * cell * 0.84);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = open > 0 ? '#c9b6ff' : '#5c7266';
+      ctx.lineWidth = Math.max(0.6, cell * 0.04);
+    }
+
     // the latch: a grey bar straight across the hunter's door while the prey
     // standing here is worth less than a predator's journey. Nothing at all
     // comes through it until the grazers are worth coming for, and that is the
@@ -2173,6 +2222,8 @@ function draw(now) {
       ? (preyDraw * 100).toFixed(0) + '%' : 'shut'}</b></span>` +
     `<span>founder reset <b>grazer ${(founderReset.grazer * 100).toFixed(0)}%` +
     ` · hunter ${(founderReset.hunter * 100).toFixed(0)}%</b></span>` +
+    `<span>refused <b>grazer ${refusals(world, 'grazer')}` +
+    ` · hunter ${refusals(world, 'hunter')}</b></span>` +
     `<span>carcasses <b>${edibleCount}</b></span>` +
     `<span>carrion larder <b>${carrionLarder}</b></span>` +
     `<span>hunter remains <b>${remainsCount}</b></span>`;
