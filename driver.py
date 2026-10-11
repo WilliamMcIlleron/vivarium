@@ -795,7 +795,10 @@ def _sync_to_cloudflare(key: str, content: str, content_type: str, log: logging.
     failures ARE logged (not just swallowed) since a silently-stale public
     site is a real problem worth being able to debug later.
     """
-    token = os.environ.get("CLOUDFLARE_API_TOKEN")
+    # Own name, not CLOUDFLARE_API_TOKEN: wrangler reads that one too, and a
+    # KV-only token set globally under it overrides `wrangler login` and breaks
+    # every other project's deploys. The fallback covers the rename window.
+    token = os.environ.get("VIVARIUM_CF_TOKEN") or os.environ.get("CLOUDFLARE_API_TOKEN")
     account_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
     if not token or not account_id:
         return

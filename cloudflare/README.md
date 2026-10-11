@@ -18,8 +18,11 @@ than embedding content in the script itself. Routes:
 reflection, and `viewer.html` whenever an evolve commit touches
 `viewer/index.html`. It authenticates with a Cloudflare API token (Workers
 KV: Edit scope, nothing broader) that William created himself and set as
-`CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID` environment variables - never
-generated or handled on his behalf.
+`VIVARIUM_CF_TOKEN`/`CLOUDFLARE_ACCOUNT_ID` environment variables - never
+generated or handled on his behalf. (Renamed from `CLOUDFLARE_API_TOKEN`
+2026-10-11: wrangler reads that name too, so the global KV-only token was
+overriding `wrangler login` and breaking deploys in other projects.
+`driver.py` still falls back to the old name.)
 
 Same failure-handling shape as `_notify`: wrapped in try/except, a no-op if
 the env vars aren't set, and a sync failure never breaks an otherwise-
